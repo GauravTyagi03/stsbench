@@ -1,0 +1,10 @@
+version: '12.5.1'
+
+services:
+  jupyter_dev:
+    build: .
+    volumes:
+      - .:/src/stsbench
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+    runtime: nvidia

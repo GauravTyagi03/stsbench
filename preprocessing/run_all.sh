@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# dorsal stream preprocessing commands
+papermill postprocess_fixation_video_neurips.ipynb log_postprocess_fixation_video_neurips.ipynb
+papermill postprocess_fixation_rf_neurips.ipynb log_postprocess_fixation_rf_neurips.ipynb
+papermill postprocess_neuron_properties.ipynb log_postprocess_neuron_properties.ipynb
+papermill construct_dataset_neurips.ipynb log_construct_dataset_neurips.ipynb

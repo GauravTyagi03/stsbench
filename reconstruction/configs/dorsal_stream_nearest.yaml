@@ -1,0 +1,4 @@
+name: dorsal_stream
+stimulus_size: 128
+model_name: nearest_neighbor
+ckpt_dir: './checkpoints/dorsal_stream/nearest_neighbor/'

@@ -1,0 +1,19 @@
+name: dorsal_stream
+modality: image
+batch_size: 64
+model_name: resnet18
+num_epochs: 15
+learning_rate: 0.001
+smooth_weight: 0.0001
+weight_decay: 0.0001
+lr_decay_step: 10
+lr_decay_gamma: 0.1
+layers: 
+    - layer1
+    - layer2
+    - layer3
+    - layer4
+stimulus_sizes: 
+    - 112 
+    - 224
+encoding_ckpt: dorsal_stream_resnet18
