@@ -1,5 +1,5 @@
 # STSBench: A Large-Scale Dataset for Modeling Neuronal Activity in the Dorsal Stream
-📊 [Dataset](https://www.kaggle.com/datasets/ethantrepka1/stsbench/)
+📚 [Paper](https://openreview.net/pdf?id=IlaCGlUHvI) | 📊 [Dataset](https://www.kaggle.com/datasets/ethantrepka1/stsbench/)
 <p align="center">
   <img src="assets/dorsal_encoding_filters.gif" alt="Activations" width="800" />
 </p>
@@ -118,7 +118,7 @@ See the associated paper for a detailed description of each model, and additiona
 
 ## Contributing
 
-The code and models is this repository are released under the MIT License. Images or videos included in this repository for reproducibility purposes and code from other repositories are bound by their original licenses. Please cite the corresponding paper if you use the code or dataset in your work.
+The code and models is this repository are released under the MIT License. Images or videos included in this repository for reproducibility purposes and code from other repositories are bound by their original licenses. Please cite the corresponding [paper](https://openreview.net/pdf?id=IlaCGlUHvI) if you use the code or dataset in your work.
 
 ## Acknowledgements
 1. The diffusion model code is a port of the [PyTorch Stable Diffusion Implementation from Explaining AI.](https://github.com/explainingai-code/StableDiffusion-PyTorch/tree/main)
