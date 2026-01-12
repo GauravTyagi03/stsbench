@@ -1,28 +1,29 @@
 import h5py
-import numpy as np
 
 f1_path = '/scratch/groups/anishm/tvsd/monkeyF_things_imgs.mat'
 f2_path = '/scratch/groups/anishm/tvsd/monkeyN_things_imgs.mat'
 
-def print_h5_file_info(file_path, name):
+def print_h5_file_summary(file_path, name):
     print(f'=== {name} file ===')
     with h5py.File(file_path, 'r') as f:
-        print('Keys:', list(f.keys()))
-        for key in f.keys():
+        keys = list(f.keys())
+        print(f'Keys: {keys}')
+        for key in keys:
             item = f[key]
             if isinstance(item, h5py.Dataset):
-                print(f'  {key}: shape = {item.shape}, dtype = {item.dtype}')
+                print(f'  {key}: Dataset with shape={item.shape}, dtype={item.dtype}')
             elif isinstance(item, h5py.Group):
-                print(f'  {key}: Group containing keys = {list(item.keys())}')
+                # Instead of printing all keys, just summarize
+                print(f'  {key}: Group with {len(item.keys())} sub-keys')
 
-print_h5_file_info(f1_path, 'MonkeyF')
-print_h5_file_info(f2_path, 'MonkeyN')
+print_h5_file_summary(f1_path, 'MonkeyF')
+print_h5_file_summary(f2_path, 'MonkeyN')
 
 print('\n=== Checking if train/test counts match ===')
 with h5py.File(f1_path, 'r') as f1, h5py.File(f2_path, 'r') as f2:
-    if 'train_imgs' in f1 and 'train_imgs' in f2:
-        print(f"MonkeyF train_imgs shape: {f1['train_imgs'].shape}")
-        print(f"MonkeyN train_imgs shape: {f2['train_imgs'].shape}")
-    if 'test_imgs' in f1 and 'test_imgs' in f2:
-        print(f"MonkeyF test_imgs shape: {f1['test_imgs'].shape}")
-        print(f"MonkeyN test_imgs shape: {f2['test_imgs'].shape}")
+    for split in ['train_imgs', 'test_imgs']:
+        if split in f1 and split in f2:
+            # Each of these is a Group, so summarize sub-keys
+            f1_group = f1[split]
+            f2_group = f2[split]
+            print(f'{split}: MonkeyF has {len(f1_group["class"])} items, MonkeyN has {len(f2_group["class"])} items')
