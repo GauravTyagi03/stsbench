@@ -14,10 +14,17 @@
 #SBATCH --mail-user=gtyagi@stanford.edu
 
 # Environment setup
-source ~/.bashrc
+#source ~/.bashrc
+module purge
+module load python/3.12.1
+module load cuda/11.5.0
 cd /oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction
-source /oak/stanford/groups/anishm/gtyagi/stsbench/venv/bin/activate
-export PYTHONPATH=""
+
+ENV=/oak/stanford/groups/anishm/gtyagi/stsbench/venv
+export VIRTUAL_ENV=$VENV
+export PATH="$VENV/bin:$PATH"
+export PYTHONNOUSERSITE=1
+unset PYTHONPATH
 
 # Thread settings for CPU operations
 N=4
@@ -30,7 +37,15 @@ export NUMEXPR_NUM_THREADS=${N}
 # PyTorch CUDA memory settings
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
+# ---- Sanity check (keep until stable) ----
+$VENV/bin/python - <<EOF
+import sys, numpy
+print("Executable:", sys.executable)
+print("NumPy:", numpy.__version__)
+print("NumPy path:", numpy.__file__)
+EOF
+
 # Train VQ-VAE autoencoder (15 epochs)
 echo "Starting VQ-VAE training..."
-python3 train_vqvae.py --config configs/ventral_stream_diffusion.yaml
+python train_vqvae.py --config configs/ventral_stream_diffusion.yaml
 echo "VQ-VAE training completed!"
