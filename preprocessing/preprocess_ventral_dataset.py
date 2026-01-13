@@ -105,17 +105,18 @@ dataset["test_activity"] = test_activity
 dataset["train_activity"] = train_activity
 
 # %%
+# Create output directory if it doesn't exist
+os.makedirs("../dataset", exist_ok=True)
+
 with open("../dataset/ventral_stream_dataset.pickle", "wb") as f:
     pickle.dump(dataset, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 # %%
-import os
 import cv2
 from pathlib import Path
 
 def convert_images_to_videos(things_folder, output_dir = "../dataset/ventral_stream/"):
-    if not os.path.exists(output_dir):
-        os.mkdir(output_dir)    
+    os.makedirs(output_dir, exist_ok=True)    
 
     ventral_images_path = Path(things_folder)
 
