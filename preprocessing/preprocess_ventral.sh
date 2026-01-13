@@ -17,6 +17,10 @@ cd /oak/stanford/groups/anishm/gtyagi/stsbench/preprocessing
 source /oak/stanford/groups/anishm/gtyagi/stsbench/venv/bin/activate
 export PYTHONPATH=""
 
+# Fix for OpenCV on headless compute nodes
+export QT_QPA_PLATFORM=offscreen
+export OPENCV_IO_ENABLE_OPENEXR=0
+
 # Thread settings for CPU operations
 N=4
 export OMP_NUM_THREADS=${N}
