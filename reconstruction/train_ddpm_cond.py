@@ -54,7 +54,7 @@ def main():
 
     ########## Instantiate dataset and loader #############
     train_dataset, test_dataset = get_stimulus_datasets(name, stimulus_size=dataset_config['im_size'], num_neurons=condition_config['neural_condition_config']['neural_embed_dim'], modality=modality)        
-    train_loader, val_loader, test_loader = get_dataloaders(train_dataset, test_dataset, batch_size=train_config['ldm_batch_size'], val_prop=0, seed=42)
+    train_loader, val_loader, test_loader = get_dataloaders(train_dataset, test_dataset, batch_size=train_config['ldm_batch_size'], val_prop=0, seed=42, num_workers=8)
              
     
     ########## Instantiate Unet model #############
@@ -124,7 +124,7 @@ def main():
                 epoch_idx + 1,
                 np.mean(losses)))
             
-        if epoch_idx % 25 == 0 or epoch_idx == num_epochs - 1:    
+        if epoch_idx % 5 == 0 or epoch_idx == num_epochs - 1:    
             torch.save(model.state_dict(), os.path.join(train_config['ckpt_dir'], train_config['ldm_ckpt_name']))
         
     print('Done Training ...')

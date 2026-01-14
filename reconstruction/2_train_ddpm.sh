@@ -9,6 +9,7 @@
 #SBATCH -G 1
 #SBATCH -C GPU_SKU:A100_SXM4
 #SBATCH --mem=32G
+#SBATCH --cpus-per-task=8
 #SBATCH -n 1
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=gtyagi@stanford.edu
@@ -27,7 +28,7 @@ export PYTHONNOUSERSITE=1
 source /oak/stanford/groups/anishm/gtyagi/stsbench/venv/bin/activate
 
 # Thread settings for CPU operations
-N=4
+N=8
 export OMP_NUM_THREADS=${N}
 export OPENBLAS_NUM_THREADS=${N}
 export MKL_NUM_THREADS=${N}
