@@ -4,7 +4,7 @@
 #SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/slurm/train_ddpm.%j.out
 #SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/slurm/train_ddpm.%j.err
 #SBATCH --time=48:00:00
-#SBATCH --qos=long
+#SBATCH --qos=normal
 #SBATCH -p owners
 #SBATCH -G 1
 #SBATCH -C GPU_SKU:A100_SXM4
