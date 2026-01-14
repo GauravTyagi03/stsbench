@@ -40,8 +40,8 @@ def main():
     train_loader, val_loader, test_loader = get_dataloaders(train_dataset, test_dataset, batch_size=train_config['autoencoder_batch_size'], val_prop=0, seed=42)
     
     # Create output directories
-    if not os.path.exists(train_config['output_dir']):
-        os.mkdir(train_config['output_dir'])
+    os.makedirs(train_config['output_dir'], exist_ok=True)
+    os.makedirs(train_config['ckpt_dir'], exist_ok=True)
         
     num_epochs = train_config['autoencoder_epochs']
 
@@ -113,8 +113,7 @@ def main():
                 grid = make_grid(torch.cat([save_input, save_output], dim=0), nrow=grid_nrow)
                 img = torchvision.transforms.ToPILImage()(grid)
                 img_output_path = os.path.join(train_config['output_dir'],'vqvae_autoencoder_samples')
-                if not os.path.exists(img_output_path):
-                    os.mkdir(img_output_path)
+                os.makedirs(img_output_path, exist_ok=True)
                 img.save(os.path.join(img_output_path,
                                       'current_autoencoder_sample_{}.png'.format(img_save_count)))
                 img_save_count += 1

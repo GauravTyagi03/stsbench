@@ -1,8 +1,8 @@
 #!/bin/bash
 #
 #SBATCH --job-name=ventral_vqvae
-#SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/train_vqvae.%j.out
-#SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/train_vqvae.%j.err
+#SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/slurm/train_vqvae.%j.out
+#SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/slurm/train_vqvae.%j.err
 #SBATCH --time=12:00:00
 #SBATCH --qos=normal
 #SBATCH -p owners
