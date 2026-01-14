@@ -1,8 +1,8 @@
 #!/bin/bash
 #
 #SBATCH --job-name=ventral_ddpm
-#SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/train_ddpm.%j.out
-#SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/train_ddpm.%j.err
+#SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/slurm/train_ddpm.%j.out
+#SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/slurm/train_ddpm.%j.err
 #SBATCH --time=48:00:00
 #SBATCH --qos=long
 #SBATCH -p owners
@@ -13,11 +13,18 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=gtyagi@stanford.edu
 
-# Environment setup
-source ~/.bashrc
-cd /oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction
+# 1. Clear everything to avoid "Sherlock Leakage"
+module purge
+# 2. Load ONLY what is necessary for the interpreter and drivers
+module load python/3.12.1
+module load cuda/12.4  # Match the cu12 packages in your pip list
+
+# 3. Aggressive path cleaning
+unset PYTHONPATH
+export PYTHONNOUSERSITE=1
+
+# 4. Activate using the full path to the activate script
 source /oak/stanford/groups/anishm/gtyagi/stsbench/venv/bin/activate
-export PYTHONPATH=""
 
 # Thread settings for CPU operations
 N=4
