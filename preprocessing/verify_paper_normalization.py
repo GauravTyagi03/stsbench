@@ -28,6 +28,45 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from preprocessing.utils import loadmat as load_matlab_file
 
 
+def load_mat_file(filepath: str) -> Dict:
+    """
+    Load MATLAB file, handling both v7.2 and v7.3 (HDF5) formats.
+    
+    Args:
+        filepath: Path to .mat file
+        
+    Returns:
+        Dictionary with MATLAB variables
+    """
+    try:
+        # Try loading as v7.2 format first
+        return loadmat(filepath)
+    except NotImplementedError as e:
+        if 'v7.3' in str(e) or 'HDF' in str(e):
+            # File is v7.3 format, use h5py
+            print(f"Loading {filepath} as MATLAB v7.3 (HDF5) format...")
+            data = {}
+            with h5py.File(filepath, 'r') as f:
+                # MATLAB v7.3 files store variables in the root group
+                # Iterate through all keys and load datasets
+                for key in f.keys():
+                    # Skip MATLAB internal metadata (keys starting with #)
+                    if not key.startswith('#'):
+                        obj = f[key]
+                        if isinstance(obj, h5py.Dataset):
+                            # Direct dataset - load as numpy array
+                            # Note: MATLAB stores matrices in column-major order,
+                            # but h5py loads them correctly, so we may need to transpose
+                            arr = np.array(obj)
+                            # MATLAB v7.3 stores data in row-major when read via h5py
+                            # but the shape might need adjustment depending on how it was saved
+                            data[key] = arr
+                        # Groups (structures) are skipped for now
+            return data
+        else:
+            raise
+
+
 class PaperNormalization:
     """
     Implements the paper's exact normalization method.
@@ -506,7 +545,7 @@ def main():
     # Load original normalized data for validation
     try:
         original_file = os.path.join(args.data_dir, f'{args.monkey}_THINGS_normMUA.mat')
-        original_data = loadmat(original_file)
+        original_data = load_mat_file(original_file)
 
         original_train = original_data['train_MUA']
         original_test = original_data['test_MUA']
