@@ -6,7 +6,7 @@
 #SBATCH --time=4:00:00
 #SBATCH --qos=normal
 #SBATCH -p owners
-#SBATCH --mem=32G
+#SBATCH --mem=128G
 #SBATCH --cpus-per-task=4
 #SBATCH -n 1
 #SBATCH --mail-type=END,FAIL
