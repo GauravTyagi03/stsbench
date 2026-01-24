@@ -1,0 +1,408 @@
+"""
+Alternative Time-Series Normalization
+
+This script implements a two-stage normalization approach:
+1. Stage 1: Trial-wise baseline normalization using first 100ms
+2. Stage 2: Per-(electrode, day, bin) normalization using test pool statistics
+
+Usage:
+    python alternative_timeseries_norm.py --monkey monkeyF
+    python alternative_timeseries_norm.py --monkey monkeyN --baseline_window 100 --bin_width 10
+"""
+
+import argparse
+import h5py
+import numpy as np
+from scipy.io import loadmat, savemat
+import os
+import sys
+import json
+from typing import Tuple, Dict
+from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+class TimeseriesNormalization:
+    """
+    Two-stage baseline + temporal bin normalization.
+
+    Stage 1: Normalize each trial using its own baseline period
+    Stage 2: Normalize each (electrode, day, bin) using test pool statistics
+    """
+
+    def __init__(self, baseline_window: int = 100, bin_width: int = 10):
+        """
+        Args:
+            baseline_window: Number of timepoints for baseline (default: 100ms)
+            bin_width: Width of temporal bins in timepoints (default: 10ms)
+        """
+        self.baseline_window = baseline_window
+        self.bin_width = bin_width
+
+    def stage1_baseline_norm(self, allmua: np.ndarray) -> Tuple[np.ndarray, Dict]:
+        """
+        Stage 1: Trial-wise baseline normalization.
+
+        Normalize each trial using its own baseline period (first N timepoints).
+
+        Args:
+            allmua: (n_timepoints, n_electrodes, n_trials)
+
+        Returns:
+            baseline_normalized: (n_timepoints, n_electrodes, n_trials)
+            stats: Dictionary with baseline statistics
+        """
+        print("\nStage 1: Baseline normalization")
+        print(f"  Using first {self.baseline_window} timepoints as baseline")
+
+        n_timepoints, n_electrodes, n_trials = allmua.shape
+
+        # Extract baseline period
+        baseline_data = allmua[:self.baseline_window, :, :]  # (baseline_window, n_electrodes, n_trials)
+
+        # Compute mean and std for each (electrode, trial)
+        baseline_mean = baseline_data.mean(axis=0, keepdims=True)  # (1, n_electrodes, n_trials)
+        baseline_std = baseline_data.std(axis=0, keepdims=True)    # (1, n_electrodes, n_trials)
+
+        # Handle zero std
+        zero_std_count = np.sum(baseline_std == 0)
+        baseline_std[baseline_std == 0] = 1.0
+
+        # Normalize all timepoints using baseline statistics
+        baseline_normalized = (allmua - baseline_mean) / baseline_std
+
+        stats = {
+            'baseline_window': self.baseline_window,
+            'zero_std_count': int(zero_std_count),
+            'zero_std_percentage': 100 * zero_std_count / (n_electrodes * n_trials),
+            'mean_baseline_mean': float(baseline_mean.mean()),
+            'mean_baseline_std': float(baseline_std.mean())
+        }
+
+        print(f"  Zero std cases: {zero_std_count} ({stats['zero_std_percentage']:.2f}%)")
+        print(f"  Mean baseline mean: {stats['mean_baseline_mean']:.4f}")
+        print(f"  Mean baseline std: {stats['mean_baseline_std']:.4f}")
+
+        # Verify baseline normalization
+        baseline_check = baseline_normalized[:self.baseline_window, :, :]
+        print(f"  Verification - baseline period mean: {baseline_check.mean():.6f}")
+        print(f"  Verification - baseline period std: {baseline_check.std():.6f}")
+
+        return baseline_normalized, stats
+
+    def bin_timeseries(self, data: np.ndarray) -> np.ndarray:
+        """
+        Average data into temporal bins.
+
+        Args:
+            data: (n_timepoints, n_electrodes, n_trials)
+
+        Returns:
+            binned: (n_bins, n_electrodes, n_trials)
+        """
+        n_timepoints, n_electrodes, n_trials = data.shape
+        n_bins = n_timepoints // self.bin_width
+
+        # Truncate to fit exact number of bins
+        truncated_length = n_bins * self.bin_width
+        data_truncated = data[:truncated_length, :, :]
+
+        # Reshape and average
+        binned = data_truncated.reshape(n_bins, self.bin_width, n_electrodes, n_trials)
+        binned = binned.mean(axis=1)  # Average within each bin
+
+        print(f"\nBinning timeseries:")
+        print(f"  Original timepoints: {n_timepoints}")
+        print(f"  Bin width: {self.bin_width}")
+        print(f"  Number of bins: {n_bins}")
+        print(f"  Binned shape: {binned.shape}")
+
+        return binned
+
+    def stage2_bin_norm(
+        self,
+        binned: np.ndarray,
+        allmat: np.ndarray
+    ) -> Tuple[np.ndarray, Dict]:
+        """
+        Stage 2: Per-(electrode, day, bin) normalization using test pool statistics.
+
+        Args:
+            binned: (n_bins, n_electrodes, n_trials)
+            allmat: (6, n_trials)
+
+        Returns:
+            normalized: (n_bins, n_electrodes, n_trials)
+            stats: Dictionary with normalization statistics
+        """
+        print("\nStage 2: Test-pool bin normalization")
+
+        n_bins, n_electrodes, n_trials = binned.shape
+
+        # Extract metadata
+        train_idx = allmat[1].astype(np.int32)
+        test_idx = allmat[2].astype(np.int32)
+        days = allmat[5].astype(np.int32)
+
+        # Create masks
+        train_mask = train_idx > 0
+        test_mask = test_idx > 0
+
+        unique_days = np.unique(days)
+
+        print(f"  Electrodes: {n_electrodes}")
+        print(f"  Days: {len(unique_days)}")
+        print(f"  Bins: {n_bins}")
+        print(f"  Train trials: {train_mask.sum()}")
+        print(f"  Test trials: {test_mask.sum()}")
+
+        # Initialize normalized array
+        normalized = np.zeros_like(binned)
+
+        # Statistics tracking
+        stats = {
+            'n_electrodes': n_electrodes,
+            'n_days': len(unique_days),
+            'n_bins': n_bins,
+            'no_test_trials': 0,
+            'zero_std': 0,
+            'total_combinations': n_electrodes * len(unique_days) * n_bins
+        }
+
+        # Normalize each (electrode, day, bin)
+        for elec_idx in range(n_electrodes):
+            if elec_idx % 100 == 0:
+                print(f"  Processing electrode {elec_idx}/{n_electrodes}")
+
+            for day in unique_days:
+                day_mask = (days == day)
+
+                for bin_idx in range(n_bins):
+                    test_day_mask = day_mask & test_mask
+
+                    # Extract test trials for this (electrode, day, bin)
+                    test_bin_data = binned[bin_idx, elec_idx, test_day_mask]
+
+                    if len(test_bin_data) == 0:
+                        # No test trials - set to zero
+                        normalized[bin_idx, elec_idx, day_mask] = 0
+                        stats['no_test_trials'] += 1
+                        continue
+
+                    # Compute mean/std from test pool
+                    mean = test_bin_data.mean()
+                    std = test_bin_data.std()
+
+                    if std == 0 or np.isnan(std):
+                        std = 1.0
+                        stats['zero_std'] += 1
+
+                    # Normalize ALL trials in this (electrode, day, bin)
+                    all_day_bin_data = binned[bin_idx, elec_idx, day_mask]
+                    normalized[bin_idx, elec_idx, day_mask] = (all_day_bin_data - mean) / std
+
+        # Calculate percentages
+        stats['no_test_trials_percentage'] = 100 * stats['no_test_trials'] / stats['total_combinations']
+        stats['zero_std_percentage'] = 100 * stats['zero_std'] / stats['total_combinations']
+
+        print(f"\nStage 2 Statistics:")
+        print(f"  No test trials: {stats['no_test_trials']} ({stats['no_test_trials_percentage']:.2f}%)")
+        print(f"  Zero std: {stats['zero_std']} ({stats['zero_std_percentage']:.2f}%)")
+
+        # Verify normalization on test trials
+        test_values = normalized[:, :, test_mask]
+        print(f"\nTest trial verification:")
+        print(f"  Mean: {test_values.mean():.6f}")
+        print(f"  Std: {test_values.std():.6f}")
+
+        return normalized, stats
+
+    def fit_transform(
+        self,
+        allmua: np.ndarray,
+        allmat: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray, Dict]:
+        """
+        Complete two-stage normalization pipeline.
+
+        Args:
+            allmua: (n_timepoints, n_electrodes, n_trials)
+            allmat: (6, n_trials)
+
+        Returns:
+            baseline_normalized: (n_timepoints, n_electrodes, n_trials)
+            final_normalized: (n_bins, n_electrodes, n_trials)
+            metadata: Combined statistics from both stages
+        """
+        # Stage 1: Baseline normalization
+        baseline_normalized, stage1_stats = self.stage1_baseline_norm(allmua)
+
+        # Bin the baseline-normalized data
+        binned = self.bin_timeseries(baseline_normalized)
+
+        # Stage 2: Bin normalization
+        final_normalized, stage2_stats = self.stage2_bin_norm(binned, allmat)
+
+        # Combine metadata
+        metadata = {
+            'baseline_window': self.baseline_window,
+            'bin_width': self.bin_width,
+            'stage1': stage1_stats,
+            'stage2': stage2_stats,
+            'final_shape': {
+                'baseline_normalized': list(baseline_normalized.shape),
+                'final_normalized': list(final_normalized.shape)
+            }
+        }
+
+        return baseline_normalized, final_normalized, metadata
+
+
+def load_mua_data(data_dir: str, monkey_name: str) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Load MUA data and apply channel mapping.
+
+    Args:
+        data_dir: Path to data directory
+        monkey_name: 'monkeyF' or 'monkeyN'
+
+    Returns:
+        allmua: (n_timepoints, n_electrodes, n_trials)
+        allmat: (6, n_trials)
+    """
+    print(f"Loading data for {monkey_name}...")
+
+    # Load main data file
+    data_file = os.path.join(data_dir, f'{monkey_name}_THINGS_MUA_trials.mat')
+
+    with h5py.File(data_file, 'r') as f:
+        # Load ALLMUA and ALLMAT
+        allmua = np.array(f['ALLMUA'])
+        allmat = np.array(f['ALLMAT'])
+
+    print(f"Loaded ALLMUA shape: {allmua.shape}")
+    print(f"Loaded ALLMAT shape: {allmat.shape}")
+
+    # Load channel mapping
+    if monkey_name == 'monkeyF':
+        mapping_file = os.path.join(data_dir, 'monkeyF_1024chns_mapping_new.mat')
+    else:
+        mapping_file = os.path.join(data_dir, 'monkeyN_1024chns_mapping_new.mat')
+
+    mapping_data = loadmat(mapping_file)
+    mapping = mapping_data['mapping'].flatten() - 1  # Convert to 0-indexed
+
+    print(f"Applying channel mapping...")
+    allmua = allmua[..., mapping]
+
+    print(f"Final ALLMUA shape: {allmua.shape}")
+    return allmua, allmat
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Alternative time-series normalization with baseline and binning'
+    )
+    parser.add_argument('--monkey', type=str, required=True,
+                        choices=['monkeyF', 'monkeyN'],
+                        help='Monkey name')
+    parser.add_argument('--data_dir', type=str,
+                        default='/scratch/groups/anishm/tvsd/',
+                        help='Path to data directory')
+    parser.add_argument('--output_dir', type=str,
+                        default='/oak/stanford/groups/anishm/gtyagi/stsbench/results/',
+                        help='Path to output directory')
+    parser.add_argument('--baseline_window', type=int, default=100,
+                        help='Number of baseline timepoints (default: 100)')
+    parser.add_argument('--bin_width', type=int, default=10,
+                        help='Bin width in timepoints (default: 10)')
+
+    args = parser.parse_args()
+
+    # Create output directory if needed
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    print("="*60)
+    print("ALTERNATIVE TIME-SERIES NORMALIZATION")
+    print("="*60)
+    print(f"Monkey: {args.monkey}")
+    print(f"Baseline window: {args.baseline_window} timepoints")
+    print(f"Bin width: {args.bin_width} timepoints")
+    print("="*60)
+
+    # Load data
+    allmua, allmat = load_mua_data(args.data_dir, args.monkey)
+
+    # Initialize normalizer
+    normalizer = TimeseriesNormalization(
+        baseline_window=args.baseline_window,
+        bin_width=args.bin_width
+    )
+
+    # Normalize
+    print("\nApplying two-stage normalization...")
+    baseline_normalized, final_normalized, metadata = normalizer.fit_transform(allmua, allmat)
+
+    print("\n" + "="*60)
+    print("RESULTS")
+    print("="*60)
+    print(f"Baseline-normalized shape: {baseline_normalized.shape}")
+    print(f"Final normalized shape: {final_normalized.shape}")
+
+    # Check for invalid values
+    if np.any(np.isnan(final_normalized)):
+        print("WARNING: NaN values detected in final normalized data!")
+        metadata['has_nan'] = True
+    else:
+        metadata['has_nan'] = False
+
+    if np.any(np.isinf(final_normalized)):
+        print("WARNING: Inf values detected in final normalized data!")
+        metadata['has_inf'] = True
+    else:
+        metadata['has_inf'] = False
+
+    max_abs_value = np.abs(final_normalized).max()
+    print(f"Max absolute value: {max_abs_value:.4f}")
+    if max_abs_value > 10:
+        print("WARNING: Very large values detected (> 10)")
+
+    metadata['max_abs_value'] = float(max_abs_value)
+    metadata['final_mean'] = float(final_normalized.mean())
+    metadata['final_std'] = float(final_normalized.std())
+
+    print(f"Final mean: {metadata['final_mean']:.6f}")
+    print(f"Final std: {metadata['final_std']:.6f}")
+
+    # Save baseline-normalized data (intermediate result)
+    baseline_file = os.path.join(args.output_dir, f'{args.monkey}_baseline_normalized.mat')
+    print(f"\nSaving baseline-normalized data to {baseline_file}")
+    savemat(baseline_file, {
+        'baseline_normalized': baseline_normalized,
+        'baseline_window': args.baseline_window
+    })
+
+    # Save final normalized data
+    final_file = os.path.join(args.output_dir, f'{args.monkey}_timeseries_normalized.mat')
+    print(f"Saving final normalized data to {final_file}")
+    savemat(final_file, {
+        'timeseries_normalized': final_normalized,
+        'bin_width': args.bin_width,
+        'n_bins': final_normalized.shape[0]
+    })
+
+    # Save metadata as JSON
+    metadata_file = os.path.join(args.output_dir, f'{args.monkey}_normalization_metadata.json')
+    print(f"Saving metadata to {metadata_file}")
+    with open(metadata_file, 'w') as f:
+        json.dump(metadata, f, indent=2)
+
+    print("\n" + "="*60)
+    print("COMPLETE")
+    print("="*60)
+
+
+if __name__ == '__main__':
+    main()
