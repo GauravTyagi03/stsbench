@@ -59,6 +59,11 @@ def load_raw_data(data_dir: str, monkey_name: str) -> Tuple[np.ndarray, np.ndarr
 
     allmua = allmua[..., mapping]
 
+    # h5py loads data as (n_timepoints, n_trials, n_electrodes)
+    # Need to transpose to (n_timepoints, n_electrodes, n_trials)
+    print(f"  Transposing from {allmua.shape} to (timepoints, electrodes, trials)")
+    allmua = np.transpose(allmua, (0, 2, 1))
+
     print(f"  ALLMUA shape: {allmua.shape}")
     print(f"  ALLMAT shape: {allmat.shape}")
 
