@@ -271,11 +271,14 @@ def load_mua_data(data_dir: str, monkey_name: str) -> Tuple[np.ndarray, np.ndarr
     print(f"Loaded ALLMUA shape: {allmua.shape}")
     print(f"Loaded ALLMAT shape: {allmat.shape}")
 
-    # Load channel mapping
-    if monkey_name == 'monkeyF':
-        mapping_file = os.path.join(data_dir, 'monkeyF_1024chns_mapping_new.mat')
-    else:
-        mapping_file = os.path.join(data_dir, 'monkeyN_1024chns_mapping_new.mat')
+    # Load channel mapping - flexible search for any mapping file
+    mapping_files = [f for f in os.listdir(data_dir)
+                     if f.startswith(f"{monkey_name}_1024chns_mapping") and f.endswith('.mat')]
+    if not mapping_files:
+        raise FileNotFoundError(f"Could not find mapping file for {monkey_name} in {data_dir}")
+
+    mapping_file = os.path.join(data_dir, mapping_files[0])
+    print(f"Using mapping file: {mapping_files[0]}")
 
     mapping_data = loadmat(mapping_file)
     mapping = mapping_data['mapping'].flatten() - 1  # Convert to 0-indexed
