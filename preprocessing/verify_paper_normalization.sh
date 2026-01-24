@@ -17,6 +17,7 @@ module purge
 # 2. Load ONLY what is necessary for the interpreter and drivers
 module load python/3.12.1
 module load hdf5/1.14.4
+module load openblas/0.3.26
 
 # 3. Aggressive path cleaning
 unset PYTHONPATH
