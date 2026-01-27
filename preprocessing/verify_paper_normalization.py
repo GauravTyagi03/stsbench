@@ -110,7 +110,7 @@ class PaperNormalization:
         Extract and average MUA data in region-specific time window.
 
         Args:
-            allmua: (n_timepoints, n_electrodes, n_trials)
+            allmua: (n_timepoints, n_trials, n_electrodes)  # CORRECTED from (n_timepoints, n_electrodes, n_trials)
             electrode_idx: Index of electrode
 
         Returns:
@@ -119,8 +119,12 @@ class PaperNormalization:
         region = self._get_brain_region(electrode_idx)
         start, end = self.brain_regions[region]['time_window']
 
-        # Extract time window and average
-        window_data = allmua[start:end, electrode_idx, :]
+        # CRITICAL FIX: Corrected indexing for shape (timepoints, trials, electrodes)
+        # OLD (assumed transposed shape):
+        # window_data = allmua[start:end, electrode_idx, :]
+
+        # NEW (for shape (timepoints, trials, electrodes)):
+        window_data = allmua[start:end, :, electrode_idx]
         return window_data.mean(axis=0)
 
     def normalize_electrode_day(
@@ -132,15 +136,16 @@ class PaperNormalization:
         Normalize each electrode separately for each day using test pool statistics.
 
         Args:
-            allmua: (n_timepoints, n_electrodes, n_trials)
+            allmua: (n_timepoints, n_trials, n_electrodes)  # CORRECTED from (n_timepoints, n_electrodes, n_trials)
             allmat: (6, n_trials) metadata array
 
         Returns:
             normalized: (n_electrodes, n_trials)
             stats: Dictionary with normalization statistics
         """
-        n_electrodes = allmua.shape[1]
-        n_trials = allmua.shape[2]
+        # CORRECTED: Extract dimensions from corrected shape
+        n_electrodes = allmua.shape[2]  # Changed from shape[1]
+        n_trials = allmua.shape[1]      # Changed from shape[2]
 
         # Extract metadata
         train_idx = allmat[1].astype(np.int32)
@@ -267,7 +272,7 @@ class PaperNormalization:
         Complete normalization pipeline.
 
         Args:
-            allmua: (n_timepoints, n_electrodes, n_trials)
+            allmua: (n_timepoints, n_trials, n_electrodes)  # CORRECTED from (n_timepoints, n_electrodes, n_trials)
             allmat: (6, n_trials)
 
         Returns:
@@ -294,7 +299,7 @@ def load_mua_data(data_dir: str, monkey_name: str) -> Tuple[np.ndarray, np.ndarr
         monkey_name: 'monkeyF' or 'monkeyN'
 
     Returns:
-        allmua: (n_timepoints, n_electrodes, n_trials)
+        allmua: (n_timepoints, n_trials, n_electrodes)  # CORRECTED from (n_timepoints, n_electrodes, n_trials)
         allmat: (6, n_trials)
     """
     print(f"Loading data for {monkey_name}...")
@@ -326,11 +331,22 @@ def load_mua_data(data_dir: str, monkey_name: str) -> Tuple[np.ndarray, np.ndarr
     allmua = allmua[..., mapping]
 
     # h5py loads data as (n_timepoints, n_trials, n_electrodes)
-    # Need to transpose to (n_timepoints, n_electrodes, n_trials)
-    print(f"Transposing from {allmua.shape} to (timepoints, electrodes, trials)")
-    allmua = np.transpose(allmua, (0, 2, 1))
+    # CRITICAL FIX: Keep shape as-is - DO NOT transpose
+    # The original code transposed to (timepoints, electrodes, trials) but this broke
+    # all downstream indexing. The correct shape is (timepoints, trials, electrodes).
+    #
+    # COMMENTED OUT - transpose was breaking indexing:
+    # print(f"Transposing from {allmua.shape} to (timepoints, electrodes, trials)")
+    # allmua = np.transpose(allmua, (0, 2, 1))
 
-    print(f"Final ALLMUA shape: {allmua.shape}")
+    # Keep shape as (300, 25248, 1024) = (timepoints, trials, electrodes)
+    print(f"Final ALLMUA shape (timepoints, trials, electrodes): {allmua.shape}")
+
+    # Sanity check: verify shape is correct
+    assert allmua.shape[0] == 300, f"Expected 300 timepoints, got {allmua.shape[0]}"
+    assert allmua.shape[2] == 1024, f"Expected 1024 electrodes, got {allmua.shape[2]}"
+    print(f"✓ Shape verified: (timepoints={allmua.shape[0]}, trials={allmua.shape[1]}, electrodes={allmua.shape[2]})")
+
     return allmua, allmat
 
 
