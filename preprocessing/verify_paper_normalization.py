@@ -569,8 +569,18 @@ def _create_validation_plots(
             region_our = our_data[:, region_electrodes].flatten()
             region_orig = orig_data[:, region_electrodes].flatten()
 
-            ax.hist(region_orig, bins=50, alpha=0.5, label='Original', density=True)
-            ax.hist(region_our, bins=50, alpha=0.5, label='Ours', density=True)
+            # For training data, clip to [-10, 10] to get smaller bins
+            if dataset_name == 'train':
+                region_our_clipped = np.clip(region_our, -10, 10)
+                region_orig_clipped = np.clip(region_orig, -10, 10)
+                bins = np.linspace(-10, 10, 100)  # 100 bins over [-10, 10] range
+            else:
+                region_our_clipped = region_our
+                region_orig_clipped = region_orig
+                bins = 50
+
+            ax.hist(region_orig_clipped, bins=bins, alpha=0.5, label='Original', density=True)
+            ax.hist(region_our_clipped, bins=bins, alpha=0.5, label='Ours', density=True)
             ax.set_xlabel('MUA Value')
             ax.set_ylabel('Density')
             ax.set_title(f'{region_name} Distribution')
