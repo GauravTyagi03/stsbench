@@ -13,6 +13,8 @@ Normalization Statistics:
 Validation Statistics:
   train_global_corr: 0.1867222883328584
   test_global_corr: 0.16319322551783258
+  train_sorted_corr: 0.9978287363491527
+  test_sorted_corr: 0.9895218582745084
   train_elec_corr_mean: 0.1840926351936798
   train_elec_corr_min: -0.09482625206529462
   test_elec_corr_mean: 0.1568426979896053
