@@ -351,216 +351,340 @@ def load_mua_data(data_dir: str, monkey_name: str) -> Tuple[np.ndarray, np.ndarr
     return allmua, allmat
 
 
-def validate_reconstruction(
+def validate_distributional_statistics(
     our_train: np.ndarray,
     our_test: np.ndarray,
     original_train: np.ndarray,
     original_test: np.ndarray,
+    brain_regions: Dict[str, Dict],
     monkey_name: str,
     output_dir: str
 ) -> Dict:
     """
-    Comprehensive validation of our reconstruction against original.
+    Validate normalization by comparing distributional statistics by brain region.
+
+    This is an order-independent validation that compares mean, std, and distributions
+    across brain regions, rather than point-by-point correlations.
 
     Args:
-        our_train: Our normalized training data
-        our_test: Our normalized test data
+        our_train: Our normalized training data (n_train_stimuli, n_electrodes)
+        our_test: Our normalized test data (n_test_stimuli, n_electrodes)
         original_train: Original training data from THINGS_normMUA.mat
         original_test: Original test data from THINGS_normMUA.mat
+        brain_regions: Dict mapping region names to electrode ranges
         monkey_name: Monkey name for output files
         output_dir: Directory for saving results
 
     Returns:
-        validation_stats: Dictionary with validation metrics
+        validation_stats: Dictionary with validation metrics by region
     """
     print("\n" + "="*60)
-    print("VALIDATION RESULTS")
+    print("DISTRIBUTIONAL STATISTICS VALIDATION")
     print("="*60)
 
-    validation_stats = {}
-
-    # DIAGNOSTICS: Check for shape mismatches and ordering issues
+    # Shape validation
     print(f"\nShape Validation:")
     print(f"  Our train shape: {our_train.shape}, Original train shape: {original_train.shape}")
     print(f"  Our test shape: {our_test.shape}, Original test shape: {original_test.shape}")
-    
+
     if our_train.shape != original_train.shape or our_test.shape != original_test.shape:
-        print("  ⚠️  WARNING: Shape mismatch detected!")
-        return validation_stats
-    
+        print("  ERROR: Shape mismatch detected!")
+        return {}
+
     # Check for NaN/Inf values
-    our_train_flat = our_train.flatten()
-    original_train_flat = original_train.flatten()
-    our_test_flat = our_test.flatten()
-    original_test_flat = original_test.flatten()
-    
     print(f"\nData Quality Checks:")
-    print(f"  Train - Our NaN/Inf: {np.isnan(our_train_flat).sum()}/{np.isinf(our_train_flat).sum()}, "
-          f"Original NaN/Inf: {np.isnan(original_train_flat).sum()}/{np.isinf(original_train_flat).sum()}")
-    print(f"  Test  - Our NaN/Inf: {np.isnan(our_test_flat).sum()}/{np.isinf(our_test_flat).sum()}, "
-          f"Original NaN/Inf: {np.isnan(original_test_flat).sum()}/{np.isinf(original_test_flat).sum()}")
+    print(f"  Train - Our NaN/Inf: {np.isnan(our_train).sum()}/{np.isinf(our_train).sum()}, "
+          f"Original NaN/Inf: {np.isnan(original_train).sum()}/{np.isinf(original_train).sum()}")
+    print(f"  Test  - Our NaN/Inf: {np.isnan(our_test).sum()}/{np.isinf(our_test).sum()}, "
+          f"Original NaN/Inf: {np.isnan(original_test).sum()}/{np.isinf(original_test).sum()}")
 
-    # Global correlation (original method - assumes same ordering)
-    train_corr = np.corrcoef(our_train_flat, original_train_flat)[0, 1]
-    test_corr = np.corrcoef(our_test_flat, original_test_flat)[0, 1]
+    # Add "ALL" region (all electrodes)
+    regions_with_all = dict(brain_regions)
+    regions_with_all['ALL'] = {'electrodes': range(our_train.shape[1])}
 
-    # DIAGNOSTIC: Check correlation after sorting (tests if ordering is the issue)
-    train_sorted_corr = np.corrcoef(np.sort(our_train_flat), np.sort(original_train_flat))[0, 1]
-    test_sorted_corr = np.corrcoef(np.sort(our_test_flat), np.sort(original_test_flat))[0, 1]
+    # Compute statistics for each region and dataset
+    results = {'train': {}, 'test': {}}
 
-    print(f"\nGlobal Correlation (Original Ordering):")
-    print(f"  Train: {train_corr:.6f}")
-    print(f"  Test:  {test_corr:.6f}")
-    
-    print(f"\nGlobal Correlation (After Sorting - Distribution Match):")
-    print(f"  Train: {train_sorted_corr:.6f}")
-    print(f"  Test:  {test_sorted_corr:.6f}")
-    
-    if test_sorted_corr > 0.95 and test_corr < 0.5:
-        print(f"\n  ⚠️  DIAGNOSIS: Low correlation ({test_corr:.4f}) but high sorted correlation ({test_sorted_corr:.4f})")
-        print(f"     This suggests an ORDERING MISMATCH - distributions match but data is in different order!")
-        print(f"     The original data may use a different stimulus ordering than our sorted-by-ID approach.")
+    for dataset_name, our_data, orig_data in [
+        ('train', our_train, original_train),
+        ('test', our_test, original_test)
+    ]:
+        print(f"\n{dataset_name.upper()} Dataset Statistics:")
+        print("-" * 60)
 
-    validation_stats['train_global_corr'] = train_corr
-    validation_stats['test_global_corr'] = test_corr
-    validation_stats['train_sorted_corr'] = train_sorted_corr
-    validation_stats['test_sorted_corr'] = test_sorted_corr
+        for region_name, region_info in regions_with_all.items():
+            region_electrodes = list(region_info['electrodes'])
 
-    # Global correlation
-    train_corr = np.corrcoef(our_train.flatten(), original_train.flatten())[0, 1]
-    test_corr = np.corrcoef(our_test.flatten(), original_test.flatten())[0, 1]
+            # Extract region data
+            region_our = our_data[:, region_electrodes]
+            region_orig = orig_data[:, region_electrodes]
 
-    print(f"\nGlobal Correlation:")
-    print(f"  Train: {train_corr:.6f}")
-    print(f"  Test:  {test_corr:.6f}")
+            # A. Global statistics (all values in region)
+            region_our_flat = region_our.flatten()
+            region_orig_flat = region_orig.flatten()
 
-    validation_stats['train_global_corr'] = train_corr
-    validation_stats['test_global_corr'] = test_corr
+            our_mean = region_our_flat.mean()
+            our_std = region_our_flat.std()
+            orig_mean = region_orig_flat.mean()
+            orig_std = region_orig_flat.std()
 
-    # Per-electrode correlation
-    n_electrodes = our_train.shape[1]
-    train_elec_corrs = []
-    test_elec_corrs = []
+            # B. Per-stimulus statistics (variation across stimuli)
+            per_stim_our = region_our.mean(axis=1)  # (n_stimuli,)
+            per_stim_orig = region_orig.mean(axis=1)
 
-    for elec in range(n_electrodes):
-        if original_train[:, elec].std() > 0:
-            corr = np.corrcoef(our_train[:, elec], original_train[:, elec])[0, 1]
-            train_elec_corrs.append(corr)
+            our_stim_variation = per_stim_our.std()
+            orig_stim_variation = per_stim_orig.std()
 
-        if original_test[:, elec].std() > 0:
-            corr = np.corrcoef(our_test[:, elec], original_test[:, elec])[0, 1]
-            test_elec_corrs.append(corr)
+            # C. Per-electrode statistics (variation across electrodes)
+            per_elec_our_mean = region_our.mean(axis=0)  # (n_electrodes_in_region,)
+            per_elec_our_std = region_our.std(axis=0)
+            per_elec_orig_mean = region_orig.mean(axis=0)
+            per_elec_orig_std = region_orig.std(axis=0)
 
-    print(f"\nPer-Electrode Correlation:")
-    print(f"  Train - Mean: {np.mean(train_elec_corrs):.6f}, "
-          f"Min: {np.min(train_elec_corrs):.6f}, "
-          f"% > 0.95: {100*np.mean(np.array(train_elec_corrs) > 0.95):.1f}%")
-    print(f"  Test  - Mean: {np.mean(test_elec_corrs):.6f}, "
-          f"Min: {np.min(test_elec_corrs):.6f}, "
-          f"% > 0.95: {100*np.mean(np.array(test_elec_corrs) > 0.95):.1f}%")
+            electrode_mean_variation_our = per_elec_our_mean.std()
+            electrode_std_variation_our = per_elec_our_std.std()
+            electrode_mean_variation_orig = per_elec_orig_mean.std()
+            electrode_std_variation_orig = per_elec_orig_std.std()
 
-    validation_stats['train_elec_corr_mean'] = np.mean(train_elec_corrs)
-    validation_stats['train_elec_corr_min'] = np.min(train_elec_corrs)
-    validation_stats['test_elec_corr_mean'] = np.mean(test_elec_corrs)
-    validation_stats['test_elec_corr_min'] = np.min(test_elec_corrs)
+            # KS test for distribution comparison
+            ks_result = ks_2samp(region_our_flat, region_orig_flat)
 
-    # Distribution comparison (KS test)
-    ks_train = ks_2samp(our_train.flatten(), original_train.flatten())
-    ks_test = ks_2samp(our_test.flatten(), original_test.flatten())
+            # Store results
+            results[dataset_name][region_name] = {
+                'our_mean': our_mean,
+                'our_std': our_std,
+                'original_mean': orig_mean,
+                'original_std': orig_std,
+                'mean_diff': abs(our_mean - orig_mean),
+                'std_diff': abs(our_std - orig_std),
+                'std_ratio': our_std / orig_std if orig_std > 0 else np.nan,
+                'our_stim_variation': our_stim_variation,
+                'original_stim_variation': orig_stim_variation,
+                'electrode_mean_variation_our': electrode_mean_variation_our,
+                'electrode_std_variation_our': electrode_std_variation_our,
+                'electrode_mean_variation_orig': electrode_mean_variation_orig,
+                'electrode_std_variation_orig': electrode_std_variation_orig,
+                'ks_statistic': ks_result.statistic,
+                'ks_pvalue': ks_result.pvalue,
+                'n_electrodes': len(region_electrodes)
+            }
 
-    print(f"\nKolmogorov-Smirnov Test:")
-    print(f"  Train - statistic: {ks_train.statistic:.6f}, p-value: {ks_train.pvalue:.6f}")
-    print(f"  Test  - statistic: {ks_test.statistic:.6f}, p-value: {ks_test.pvalue:.6f}")
+            # Print summary
+            stats = results[dataset_name][region_name]
+            print(f"\n{region_name} ({stats['n_electrodes']} electrodes):")
+            print(f"  Mean:  Ours={our_mean:.4f}, Orig={orig_mean:.4f}, Diff={stats['mean_diff']:.4f}")
+            print(f"  Std:   Ours={our_std:.4f}, Orig={orig_std:.4f}, Ratio={stats['std_ratio']:.4f}")
+            print(f"  Stim Variation: Ours={our_stim_variation:.4f}, Orig={orig_stim_variation:.4f}")
+            print(f"  KS Test: stat={ks_result.statistic:.4f}, p={ks_result.pvalue:.4f}")
 
-    validation_stats['ks_train_stat'] = ks_train.statistic
-    validation_stats['ks_train_pval'] = ks_train.pvalue
-    validation_stats['ks_test_stat'] = ks_test.statistic
-    validation_stats['ks_test_pval'] = ks_test.pvalue
+    # Create visualizations
+    _create_validation_plots(results, our_train, our_test, original_train, original_test,
+                              regions_with_all, monkey_name, output_dir)
 
-    # MSE and MAE
-    train_mse = np.mean((our_train - original_train) ** 2)
-    test_mse = np.mean((our_test - original_test) ** 2)
-    train_mae = np.mean(np.abs(our_train - original_train))
-    test_mae = np.mean(np.abs(our_test - original_test))
-
-    print(f"\nMean Squared Error:")
-    print(f"  Train: {train_mse:.6f}")
-    print(f"  Test:  {test_mse:.6f}")
-    print(f"\nMean Absolute Error:")
-    print(f"  Train: {train_mae:.6f}")
-    print(f"  Test:  {test_mae:.6f}")
-
-    validation_stats['train_mse'] = train_mse
-    validation_stats['test_mse'] = test_mse
-    validation_stats['train_mae'] = train_mae
-    validation_stats['test_mae'] = test_mae
-
-    # Mean and std comparison
-    print(f"\nMean Comparison:")
-    print(f"  Train - Ours: {our_train.mean():.6f}, Original: {original_train.mean():.6f}")
-    print(f"  Test  - Ours: {our_test.mean():.6f}, Original: {original_test.mean():.6f}")
-    print(f"\nStd Comparison:")
-    print(f"  Train - Ours: {our_train.std():.6f}, Original: {original_train.std():.6f}")
-    print(f"  Test  - Ours: {our_test.std():.6f}, Original: {original_test.std():.6f}")
-
-    # Create validation plots
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-
-    # Scatter plot - train
-    axes[0, 0].scatter(original_train.flatten(), our_train.flatten(),
-                       alpha=0.1, s=1)
-    axes[0, 0].plot([original_train.min(), original_train.max()],
-                    [original_train.min(), original_train.max()],
-                    'r--', linewidth=2, label='Identity')
-    axes[0, 0].set_xlabel('Original Train MUA')
-    axes[0, 0].set_ylabel('Our Train MUA')
-    axes[0, 0].set_title(f'Train Data (corr={train_corr:.4f})')
-    axes[0, 0].legend()
-    axes[0, 0].grid(True, alpha=0.3)
-
-    # Scatter plot - test
-    axes[0, 1].scatter(original_test.flatten(), our_test.flatten(),
-                       alpha=0.1, s=1)
-    axes[0, 1].plot([original_test.min(), original_test.max()],
-                    [original_test.min(), original_test.max()],
-                    'r--', linewidth=2, label='Identity')
-    axes[0, 1].set_xlabel('Original Test MUA')
-    axes[0, 1].set_ylabel('Our Test MUA')
-    axes[0, 1].set_title(f'Test Data (corr={test_corr:.4f})')
-    axes[0, 1].legend()
-    axes[0, 1].grid(True, alpha=0.3)
-
-    # Histogram comparison - train
-    axes[1, 0].hist(original_train.flatten(), bins=100, alpha=0.5,
-                    label='Original', density=True)
-    axes[1, 0].hist(our_train.flatten(), bins=100, alpha=0.5,
-                    label='Ours', density=True)
-    axes[1, 0].set_xlabel('Train MUA Value')
-    axes[1, 0].set_ylabel('Density')
-    axes[1, 0].set_title('Train Distribution')
-    axes[1, 0].legend()
-    axes[1, 0].grid(True, alpha=0.3)
-
-    # Histogram comparison - test
-    axes[1, 1].hist(original_test.flatten(), bins=100, alpha=0.5,
-                    label='Original', density=True)
-    axes[1, 1].hist(our_test.flatten(), bins=100, alpha=0.5,
-                    label='Ours', density=True)
-    axes[1, 1].set_xlabel('Test MUA Value')
-    axes[1, 1].set_ylabel('Density')
-    axes[1, 1].set_title('Test Distribution')
-    axes[1, 1].legend()
-    axes[1, 1].grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    plot_path = os.path.join(output_dir, f'{monkey_name}_validation_plots.png')
-    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
-    print(f"\nSaved validation plots to {plot_path}")
-    plt.close()
+    # Create summary report
+    _create_validation_report(results, monkey_name, output_dir)
 
     print("\n" + "="*60)
 
-    return validation_stats
+    return results
+
+
+def _create_validation_plots(
+    results: Dict,
+    our_train: np.ndarray,
+    our_test: np.ndarray,
+    original_train: np.ndarray,
+    original_test: np.ndarray,
+    brain_regions: Dict[str, Dict],
+    monkey_name: str,
+    output_dir: str
+):
+    """Create comprehensive validation plots."""
+
+    # Create 2 figures (one for train, one for test)
+    for dataset_name, our_data, orig_data in [
+        ('train', our_train, original_train),
+        ('test', our_test, original_test)
+    ]:
+        fig = plt.figure(figsize=(16, 12))
+
+        # Panel 1: Mean Comparison by Region
+        ax1 = plt.subplot(2, 3, 1)
+        regions = list(results[dataset_name].keys())
+        our_means = [results[dataset_name][r]['our_mean'] for r in regions]
+        orig_means = [results[dataset_name][r]['original_mean'] for r in regions]
+
+        x = np.arange(len(regions))
+        width = 0.35
+        ax1.bar(x - width/2, orig_means, width, label='Original', alpha=0.8)
+        ax1.bar(x + width/2, our_means, width, label='Ours', alpha=0.8)
+        ax1.set_xlabel('Brain Region')
+        ax1.set_ylabel('Mean')
+        ax1.set_title('Mean Comparison by Region')
+        ax1.set_xticks(x)
+        ax1.set_xticklabels(regions)
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+
+        # Panel 2: Std Comparison by Region
+        ax2 = plt.subplot(2, 3, 2)
+        our_stds = [results[dataset_name][r]['our_std'] for r in regions]
+        orig_stds = [results[dataset_name][r]['original_std'] for r in regions]
+
+        ax2.bar(x - width/2, orig_stds, width, label='Original', alpha=0.8)
+        ax2.bar(x + width/2, our_stds, width, label='Ours', alpha=0.8)
+        ax2.set_xlabel('Brain Region')
+        ax2.set_ylabel('Std')
+        ax2.set_title('Std Comparison by Region')
+        ax2.set_xticks(x)
+        ax2.set_xticklabels(regions)
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+
+        # Panel 3: Per-Stimulus Variation
+        ax3 = plt.subplot(2, 3, 3)
+        our_stim_vars = [results[dataset_name][r]['our_stim_variation'] for r in regions]
+        orig_stim_vars = [results[dataset_name][r]['original_stim_variation'] for r in regions]
+
+        ax3.bar(x - width/2, orig_stim_vars, width, label='Original', alpha=0.8)
+        ax3.bar(x + width/2, our_stim_vars, width, label='Ours', alpha=0.8)
+        ax3.set_xlabel('Brain Region')
+        ax3.set_ylabel('Stimulus Variation (Std)')
+        ax3.set_title('Per-Stimulus Variation by Region')
+        ax3.set_xticks(x)
+        ax3.set_xticklabels(regions)
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+
+        # Panel 4-7: Distribution Histograms by Region (4 subplots)
+        for idx, region_name in enumerate(['V1', 'V4', 'IT', 'ALL']):
+            ax = plt.subplot(2, 3, idx + 4)
+            region_electrodes = list(brain_regions[region_name]['electrodes'])
+
+            region_our = our_data[:, region_electrodes].flatten()
+            region_orig = orig_data[:, region_electrodes].flatten()
+
+            ax.hist(region_orig, bins=50, alpha=0.5, label='Original', density=True)
+            ax.hist(region_our, bins=50, alpha=0.5, label='Ours', density=True)
+            ax.set_xlabel('MUA Value')
+            ax.set_ylabel('Density')
+            ax.set_title(f'{region_name} Distribution')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+
+        plt.suptitle(f'{dataset_name.upper()} Dataset - Distributional Validation',
+                     fontsize=14, fontweight='bold')
+        plt.tight_layout()
+
+        plot_path = os.path.join(output_dir, f'{monkey_name}_{dataset_name}_distributional_validation.png')
+        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+        print(f"Saved {dataset_name} validation plot to {plot_path}")
+        plt.close()
+
+
+def _create_validation_report(results: Dict, monkey_name: str, output_dir: str):
+    """Create detailed validation report."""
+
+    report_path = os.path.join(output_dir, f'{monkey_name}_distributional_validation_report.txt')
+
+    with open(report_path, 'w') as f:
+        f.write("="*80 + "\n")
+        f.write("DISTRIBUTIONAL STATISTICS VALIDATION REPORT\n")
+        f.write("="*80 + "\n\n")
+        f.write(f"Monkey: {monkey_name}\n\n")
+
+        # Validation criteria
+        f.write("VALIDATION CRITERIA:\n")
+        f.write("  - Mean difference < 0.01 per region\n")
+        f.write("  - Std ratio within [0.95, 1.05] per region\n")
+        f.write("  - KS test p-value > 0.05 per region\n\n")
+
+        for dataset_name in ['train', 'test']:
+            f.write("="*80 + "\n")
+            f.write(f"{dataset_name.upper()} DATASET\n")
+            f.write("="*80 + "\n\n")
+
+            # Table header
+            f.write(f"{'Region':<8} {'N_Elec':<8} {'Our_Mean':<10} {'Orig_Mean':<10} {'Mean_Diff':<10} "
+                   f"{'Our_Std':<10} {'Orig_Std':<10} {'Std_Ratio':<10} {'KS_pval':<10} {'Pass':<5}\n")
+            f.write("-"*100 + "\n")
+
+            # Table rows
+            all_pass = True
+            for region_name in ['V1', 'V4', 'IT', 'ALL']:
+                stats = results[dataset_name][region_name]
+
+                # Check pass criteria
+                mean_pass = stats['mean_diff'] < 0.01
+                std_pass = 0.95 <= stats['std_ratio'] <= 1.05
+                ks_pass = stats['ks_pvalue'] > 0.05
+                region_pass = mean_pass and std_pass and ks_pass
+                all_pass = all_pass and region_pass
+
+                f.write(f"{region_name:<8} {stats['n_electrodes']:<8} "
+                       f"{stats['our_mean']:<10.4f} {stats['original_mean']:<10.4f} {stats['mean_diff']:<10.4f} "
+                       f"{stats['our_std']:<10.4f} {stats['original_std']:<10.4f} {stats['std_ratio']:<10.4f} "
+                       f"{stats['ks_pvalue']:<10.4f} {'PASS' if region_pass else 'FAIL':<5}\n")
+
+            f.write("\n")
+
+            # Investigation of training std
+            if dataset_name == 'train':
+                f.write("INVESTIGATION OF TRAINING STD:\n")
+                f.write("-"*80 + "\n")
+
+                train_all_std = results['train']['ALL']['our_std']
+                test_all_std = results['test']['ALL']['our_std']
+
+                f.write(f"\nTrain vs Test Std Comparison:\n")
+                f.write(f"  Train Std: {train_all_std:.4f}\n")
+                f.write(f"  Test Std:  {test_all_std:.4f}\n")
+                f.write(f"  Ratio (test/train): {test_all_std/train_all_std:.4f}\n")
+
+                f.write(f"\nPer-Stimulus Variation (std of stimulus means):\n")
+                for region in ['V1', 'V4', 'IT', 'ALL']:
+                    train_stim_var = results['train'][region]['our_stim_variation']
+                    test_stim_var = results['test'][region]['our_stim_variation']
+                    f.write(f"  {region}: Train={train_stim_var:.4f}, Test={test_stim_var:.4f}\n")
+
+                f.write(f"\nPer-Electrode Variation:\n")
+                for region in ['V1', 'V4', 'IT', 'ALL']:
+                    elec_mean_var = results['train'][region]['electrode_mean_variation_our']
+                    elec_std_var = results['train'][region]['electrode_std_variation_our']
+                    f.write(f"  {region}: Mean_Var={elec_mean_var:.4f}, Std_Var={elec_std_var:.4f}\n")
+
+                f.write("\n")
+
+            # Summary
+            f.write(f"\n{dataset_name.upper()} SUMMARY: ")
+            if all_pass:
+                f.write("PASS - All regions meet validation criteria\n\n")
+            else:
+                f.write("FAIL - Some regions do not meet validation criteria\n\n")
+
+        # Overall summary
+        train_pass = all(
+            results['train'][r]['mean_diff'] < 0.01 and
+            0.95 <= results['train'][r]['std_ratio'] <= 1.05 and
+            results['train'][r]['ks_pvalue'] > 0.05
+            for r in ['V1', 'V4', 'IT', 'ALL']
+        )
+        test_pass = all(
+            results['test'][r]['mean_diff'] < 0.01 and
+            0.95 <= results['test'][r]['std_ratio'] <= 1.05 and
+            results['test'][r]['ks_pvalue'] > 0.05
+            for r in ['V1', 'V4', 'IT', 'ALL']
+        )
+
+        f.write("="*80 + "\n")
+        f.write("OVERALL VALIDATION: ")
+        if train_pass and test_pass:
+            f.write("PASS\n")
+        else:
+            f.write("FAIL\n")
+        f.write("="*80 + "\n")
+
+    print(f"Saved validation report to {report_path}")
 
 
 def main():
@@ -618,41 +742,13 @@ def main():
         print(f"  Original train_MUA shape: {original_train.shape}")
         print(f"  Original test_MUA shape: {original_test.shape}")
 
-        # Validate
-        validation_stats = validate_reconstruction(
+        # Validate using distributional statistics
+        validation_results = validate_distributional_statistics(
             train_MUA, test_MUA,
             original_train, original_test,
+            normalizer.brain_regions,
             args.monkey, args.output_dir
         )
-
-        # Save validation report
-        report_file = os.path.join(args.output_dir, f'{args.monkey}_validation_report.txt')
-        with open(report_file, 'w') as f:
-            f.write("PAPER NORMALIZATION VALIDATION REPORT\n")
-            f.write("=" * 60 + "\n\n")
-            f.write(f"Monkey: {args.monkey}\n\n")
-
-            f.write("Normalization Statistics:\n")
-            for key, value in stats.items():
-                f.write(f"  {key}: {value}\n")
-
-            f.write("\nValidation Statistics:\n")
-            for key, value in validation_stats.items():
-                f.write(f"  {key}: {value}\n")
-
-            f.write("\nValidation Summary:\n")
-            train_corr = validation_stats['train_global_corr']
-            test_corr = validation_stats['test_global_corr']
-
-            if train_corr > 0.99 and test_corr > 0.99:
-                f.write("  ✓ PASS - Excellent match (correlation > 0.99)\n")
-            elif train_corr > 0.95 and test_corr > 0.95:
-                f.write("  ✓ PASS - Good match (correlation > 0.95)\n")
-            else:
-                f.write("  ✗ FAIL - Poor match (correlation < 0.95)\n")
-                f.write("  ACTION REQUIRED: Review data structure and normalization logic\n")
-
-        print(f"Saved validation report to {report_file}")
 
     except FileNotFoundError:
         print(f"\nWarning: Could not find {original_file}")
