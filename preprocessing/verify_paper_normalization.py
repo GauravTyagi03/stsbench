@@ -338,6 +338,7 @@ def load_mua_data(data_dir: str, monkey_name: str) -> Tuple[np.ndarray, np.ndarr
     # COMMENTED OUT - transpose was breaking indexing:
     # print(f"Transposing from {allmua.shape} to (timepoints, electrodes, trials)")
     # allmua = np.transpose(allmua, (0, 2, 1))
+    
 
     # Keep shape as (300, 25248, 1024) = (timepoints, trials, electrodes)
     print(f"Final ALLMUA shape (timepoints, trials, electrodes): {allmua.shape}")
@@ -377,6 +378,53 @@ def validate_reconstruction(
     print("="*60)
 
     validation_stats = {}
+
+    # DIAGNOSTICS: Check for shape mismatches and ordering issues
+    print(f"\nShape Validation:")
+    print(f"  Our train shape: {our_train.shape}, Original train shape: {original_train.shape}")
+    print(f"  Our test shape: {our_test.shape}, Original test shape: {original_test.shape}")
+    
+    if our_train.shape != original_train.shape or our_test.shape != original_test.shape:
+        print("  ⚠️  WARNING: Shape mismatch detected!")
+        return validation_stats
+    
+    # Check for NaN/Inf values
+    our_train_flat = our_train.flatten()
+    original_train_flat = original_train.flatten()
+    our_test_flat = our_test.flatten()
+    original_test_flat = original_test.flatten()
+    
+    print(f"\nData Quality Checks:")
+    print(f"  Train - Our NaN/Inf: {np.isnan(our_train_flat).sum()}/{np.isinf(our_train_flat).sum()}, "
+          f"Original NaN/Inf: {np.isnan(original_train_flat).sum()}/{np.isinf(original_train_flat).sum()}")
+    print(f"  Test  - Our NaN/Inf: {np.isnan(our_test_flat).sum()}/{np.isinf(our_test_flat).sum()}, "
+          f"Original NaN/Inf: {np.isnan(original_test_flat).sum()}/{np.isinf(original_test_flat).sum()}")
+
+    # Global correlation (original method - assumes same ordering)
+    train_corr = np.corrcoef(our_train_flat, original_train_flat)[0, 1]
+    test_corr = np.corrcoef(our_test_flat, original_test_flat)[0, 1]
+
+    # DIAGNOSTIC: Check correlation after sorting (tests if ordering is the issue)
+    train_sorted_corr = np.corrcoef(np.sort(our_train_flat), np.sort(original_train_flat))[0, 1]
+    test_sorted_corr = np.corrcoef(np.sort(our_test_flat), np.sort(original_test_flat))[0, 1]
+
+    print(f"\nGlobal Correlation (Original Ordering):")
+    print(f"  Train: {train_corr:.6f}")
+    print(f"  Test:  {test_corr:.6f}")
+    
+    print(f"\nGlobal Correlation (After Sorting - Distribution Match):")
+    print(f"  Train: {train_sorted_corr:.6f}")
+    print(f"  Test:  {test_sorted_corr:.6f}")
+    
+    if test_sorted_corr > 0.95 and test_corr < 0.5:
+        print(f"\n  ⚠️  DIAGNOSIS: Low correlation ({test_corr:.4f}) but high sorted correlation ({test_sorted_corr:.4f})")
+        print(f"     This suggests an ORDERING MISMATCH - distributions match but data is in different order!")
+        print(f"     The original data may use a different stimulus ordering than our sorted-by-ID approach.")
+
+    validation_stats['train_global_corr'] = train_corr
+    validation_stats['test_global_corr'] = test_corr
+    validation_stats['train_sorted_corr'] = train_sorted_corr
+    validation_stats['test_sorted_corr'] = test_sorted_corr
 
     # Global correlation
     train_corr = np.corrcoef(our_train.flatten(), original_train.flatten())[0, 1]
