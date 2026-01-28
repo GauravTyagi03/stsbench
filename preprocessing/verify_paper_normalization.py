@@ -506,10 +506,12 @@ def _create_validation_plots(
         ('train', our_train, original_train),
         ('test', our_test, original_test)
     ]:
-        fig = plt.figure(figsize=(16, 12))
+        # We plot 7 panels total: 3 summary bar charts + 4 region histograms.
+        # Use a 2x4 grid (8 slots) to avoid subplot indexing errors.
+        fig, axes = plt.subplots(2, 4, figsize=(20, 10))
 
         # Panel 1: Mean Comparison by Region
-        ax1 = plt.subplot(2, 3, 1)
+        ax1 = axes[0, 0]
         regions = list(results[dataset_name].keys())
         our_means = [results[dataset_name][r]['our_mean'] for r in regions]
         orig_means = [results[dataset_name][r]['original_mean'] for r in regions]
@@ -527,7 +529,7 @@ def _create_validation_plots(
         ax1.grid(True, alpha=0.3)
 
         # Panel 2: Std Comparison by Region
-        ax2 = plt.subplot(2, 3, 2)
+        ax2 = axes[0, 1]
         our_stds = [results[dataset_name][r]['our_std'] for r in regions]
         orig_stds = [results[dataset_name][r]['original_std'] for r in regions]
 
@@ -542,7 +544,7 @@ def _create_validation_plots(
         ax2.grid(True, alpha=0.3)
 
         # Panel 3: Per-Stimulus Variation
-        ax3 = plt.subplot(2, 3, 3)
+        ax3 = axes[0, 2]
         our_stim_vars = [results[dataset_name][r]['our_stim_variation'] for r in regions]
         orig_stim_vars = [results[dataset_name][r]['original_stim_variation'] for r in regions]
 
@@ -556,9 +558,12 @@ def _create_validation_plots(
         ax3.legend()
         ax3.grid(True, alpha=0.3)
 
+        # Panel 4: unused (kept for layout symmetry)
+        axes[0, 3].axis('off')
+
         # Panel 4-7: Distribution Histograms by Region (4 subplots)
         for idx, region_name in enumerate(['V1', 'V4', 'IT', 'ALL']):
-            ax = plt.subplot(2, 3, idx + 4)
+            ax = axes[1, idx]
             region_electrodes = list(brain_regions[region_name]['electrodes'])
 
             region_our = our_data[:, region_electrodes].flatten()
@@ -572,12 +577,16 @@ def _create_validation_plots(
             ax.legend()
             ax.grid(True, alpha=0.3)
 
-        plt.suptitle(f'{dataset_name.upper()} Dataset - Distributional Validation',
-                     fontsize=14, fontweight='bold')
-        plt.tight_layout()
+        fig.suptitle(
+            f'{dataset_name.upper()} Dataset - Distributional Validation',
+            fontsize=14,
+            fontweight='bold'
+        )
+        # Leave space for the suptitle.
+        fig.tight_layout(rect=[0, 0.03, 1, 0.95])
 
         plot_path = os.path.join(output_dir, f'{monkey_name}_{dataset_name}_distributional_validation.png')
-        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+        fig.savefig(plot_path, dpi=150, bbox_inches='tight')
         print(f"Saved {dataset_name} validation plot to {plot_path}")
         plt.close()
 
