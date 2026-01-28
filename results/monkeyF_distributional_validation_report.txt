@@ -1,0 +1,62 @@
+================================================================================
+DISTRIBUTIONAL STATISTICS VALIDATION REPORT
+================================================================================
+
+Monkey: monkeyF
+
+VALIDATION CRITERIA:
+  - Mean difference < 0.01 per region
+  - Std ratio within [0.95, 1.05] per region
+  - KS test p-value > 0.05 per region
+
+================================================================================
+TRAIN DATASET
+================================================================================
+
+Region   N_Elec   Our_Mean   Orig_Mean  Mean_Diff  Our_Std    Orig_Std   Std_Ratio  KS_pval    Pass 
+----------------------------------------------------------------------------------------------------
+V1       512      0.0024     0.0220     0.0196     1.0062     0.4622     2.1770     0.0000     FAIL 
+V4       192      0.0182     0.0114     0.0068     1.0153     0.4440     2.2868     0.0000     FAIL 
+IT       320      0.0116     0.0209     0.0092     1.0059     0.4102     2.4523     0.0000     FAIL 
+ALL      1024     0.0082     0.0197     0.0114     1.0079     0.4431     2.2744     0.0000     FAIL 
+
+INVESTIGATION OF TRAINING STD:
+--------------------------------------------------------------------------------
+
+Train vs Test Std Comparison:
+  Train Std: 1.0079
+  Test Std:  0.2051
+  Ratio (test/train): 0.2035
+
+Per-Stimulus Variation (std of stimulus means):
+  V1: Train=0.3835, Test=0.0727
+  V4: Train=0.3993, Test=0.1018
+  IT: Train=0.3633, Test=0.0690
+  ALL: Train=0.3254, Test=0.0638
+
+Per-Electrode Variation:
+  V1: Mean_Var=0.0207, Std_Var=0.0198
+  V4: Mean_Var=0.0236, Std_Var=0.0566
+  IT: Mean_Var=0.0222, Std_Var=0.0185
+  ALL: Mean_Var=0.0226, Std_Var=0.0302
+
+
+TRAIN SUMMARY: FAIL - Some regions do not meet validation criteria
+
+================================================================================
+TEST DATASET
+================================================================================
+
+Region   N_Elec   Our_Mean   Orig_Mean  Mean_Diff  Our_Std    Orig_Std   Std_Ratio  KS_pval    Pass 
+----------------------------------------------------------------------------------------------------
+V1       512      0.0000     -0.0000    0.0000     0.1855     0.3037     0.6109     0.0000     FAIL 
+V4       192      0.0000     -0.0000    0.0000     0.2289     0.3371     0.6791     0.0000     FAIL 
+IT       320      -0.0000    0.0000     0.0000     0.2193     0.2416     0.9077     0.0000     FAIL 
+ALL      1024     0.0000     0.0000     0.0000     0.2051     0.2927     0.7008     0.0000     FAIL 
+
+
+TEST SUMMARY: FAIL - Some regions do not meet validation criteria
+
+================================================================================
+OVERALL VALIDATION: FAIL
+================================================================================
