@@ -574,6 +574,7 @@ def _create_validation_plots(
             ax.set_xlabel('MUA Value')
             ax.set_ylabel('Density')
             ax.set_title(f'{region_name} Distribution')
+            ax.set_xlim(-3, 3)  # Clip x-axis to [-3, 3]
             ax.legend()
             ax.grid(True, alpha=0.3)
 
