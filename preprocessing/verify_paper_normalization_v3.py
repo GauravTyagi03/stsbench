@@ -99,22 +99,29 @@ def normalize_mua(allmua, allmat, brain_regions):
 
         # Extract time-windowed data
         start, end = electrode_to_region[elec_idx]
-        elec_data = allmua[start:end, :, elec_idx].mean(axis=0)  # (n_trials,)
+        windowed_data = allmua[start:end, :, elec_idx]  # (n_timepoints, n_trials)
 
         # Normalize per day using test pool
         for day in np.unique(days):
             day_mask = days == day
-            test_day_data = elec_data[day_mask & test_mask]
+            test_day_mask = day_mask & test_mask
 
-            if len(test_day_data) == 0:
+            # Get 2D test data for this day (timepoints × trials)
+            test_day_2d = windowed_data[:, test_day_mask]
+
+            if test_day_2d.shape[1] == 0:
                 normalized[elec_idx, day_mask] = 0
                 continue
 
-            mean = test_day_data.mean()
-            std = test_day_data.std(ddof=1)
+            # Compute mean and std across ALL values (trials AND timepoints)
+            mean = test_day_2d.mean()
+            std = test_day_2d.std(ddof=1)
             std = 1.0 if std == 0 or np.isnan(std) else std
 
-            normalized[elec_idx, day_mask] = (elec_data[day_mask] - mean) / std
+            # Average across time for normalization, then normalize
+            day_data_2d = windowed_data[:, day_mask]
+            elec_data_day = day_data_2d.mean(axis=0)  # Average time for this day
+            normalized[elec_idx, day_mask] = (elec_data_day - mean) / std
 
     return normalized
 
