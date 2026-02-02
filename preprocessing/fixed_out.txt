@@ -1,0 +1,44 @@
+--- Environment Check ---
+/oak/stanford/groups/anishm/gtyagi/stsbench/venv/bin/python
+Python 3.12.1
+HDF5 module loaded
+-------------------------
+Starting paper normalization verification...
+Loading monkeyN data...
+Loaded shape: (300, 25248, 1024) (timepoints, trials, electrodes)
+
+Applying normalization...
+Normalizing 1024 electrodes...
+  Processing electrode 0/1024
+  Processing electrode 200/1024
+  Processing electrode 400/1024
+  Processing electrode 600/1024
+  Processing electrode 800/1024
+  Processing electrode 1000/1024
+Averaged: 22248 train, 100 test stimuli
+
+Results:
+  train_MUA: (22248, 1024)
+  test_MUA: (100, 1024)
+  test_MUA_reps: (1024, 100, 30)
+
+Saved: /oak/stanford/groups/anishm/gtyagi/stsbench/results/monkeyN_paper_normalized.mat
+
+============================================================
+VALIDATION RESULTS
+============================================================
+
+TRAIN Dataset:
+  V1  : Mean diff=0.0194, Std ratio=0.9897, KS p=0.0000
+  V4  : Mean diff=0.0264, Std ratio=0.8959, KS p=0.0000
+  IT  : Mean diff=0.0257, Std ratio=0.8989, KS p=0.0000
+  ALL : Mean diff=0.0227, Std ratio=0.9457, KS p=0.0000
+  Saved plot: /oak/stanford/groups/anishm/gtyagi/stsbench/results/monkeyN_train_validation_plots.png
+
+TEST Dataset:
+  V1  : Mean diff=0.0000, Std ratio=0.2215, KS p=0.0000
+  V4  : Mean diff=0.0000, Std ratio=0.3101, KS p=0.0000
+  IT  : Mean diff=0.0000, Std ratio=0.3995, KS p=0.0000
+  ALL : Mean diff=0.0000, Std ratio=0.2890, KS p=0.0000
+  Saved plot: /oak/stanford/groups/anishm/gtyagi/stsbench/results/monkeyN_test_validation_plots.png
+Paper normalization verification completed!
