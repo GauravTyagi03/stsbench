@@ -53,6 +53,7 @@ def load_mua_data(data_dir, monkey_name):
     with h5py.File(data_file, 'r') as f:
         allmua = np.array(f['ALLMUA'])  # (timepoints, trials, electrodes)
         allmat = np.array(f['ALLMAT'])  # (6, trials)
+        tb = np.array(f['tb']).flatten()  # Time base vector (in ms)
 
     # Load channel mapping
     mapping_files = [f for f in os.listdir(data_dir)
@@ -62,10 +63,15 @@ def load_mua_data(data_dir, monkey_name):
 
     allmua = allmua[..., mapping]
     print(f"Loaded shape: {allmua.shape} (timepoints, trials, electrodes)")
-    return allmua, allmat
+    print(f"Time base: {tb.min():.1f} to {tb.max():.1f} ms, {len(tb)} points")
+
+    # Verify tb matches allmua shape
+    assert len(tb) == allmua.shape[0], f"tb length {len(tb)} != allmua timepoints {allmua.shape[0]}"
+
+    return allmua, allmat, tb
 
 
-def normalize_mua(allmua, allmat, brain_regions):
+def normalize_mua(allmua, allmat, brain_regions, tb):
     """
     Normalize MUA using test pool statistics per (electrode, day).
 
@@ -73,6 +79,7 @@ def normalize_mua(allmua, allmat, brain_regions):
         allmua: (n_timepoints, n_trials, n_electrodes)
         allmat: (6, n_trials) - metadata with [_, train_idx, test_idx, _, _, day]
         brain_regions: Dict of region configs
+        tb: (n_timepoints,) - time base vector in ms
 
     Returns:
         normalized: (n_electrodes, n_trials)
@@ -86,20 +93,27 @@ def normalize_mua(allmua, allmat, brain_regions):
 
     normalized = np.zeros((n_electrodes, n_trials))
 
-    # Get electrode -> region mapping
-    electrode_to_region = {}
+    # Get electrode -> region mapping with correct time indices
+    electrode_to_indices = {}
     for region, config in brain_regions.items():
+        start_ms, end_ms = config['time_window']
+        # Match MATLAB logic: tb > start_ms & tb <= end_ms
+        time_mask = (tb > start_ms) & (tb <= end_ms)
+        time_indices = np.where(time_mask)[0]
+
         for elec_idx in config['electrodes']:
-            electrode_to_region[elec_idx] = config['time_window']
+            electrode_to_indices[elec_idx] = time_indices
 
     print(f"Normalizing {n_electrodes} electrodes...")
+    print(f"  Example time window V1 (25-125ms): indices {electrode_to_indices[0][:3]}...{electrode_to_indices[0][-3:]}")
+
     for elec_idx in range(n_electrodes):
         if elec_idx % 200 == 0:
             print(f"  Processing electrode {elec_idx}/{n_electrodes}")
 
-        # Extract time-windowed data
-        start, end = electrode_to_region[elec_idx]
-        windowed_data = allmua[start:end, :, elec_idx]  # (n_timepoints, n_trials)
+        # Extract time-windowed data using correct indices
+        time_indices = electrode_to_indices[elec_idx]
+        windowed_data = allmua[time_indices, :, elec_idx]  # (n_timepoints_in_window, n_trials)
 
         # Normalize per day using test pool
         for day in np.unique(days):
@@ -115,7 +129,7 @@ def normalize_mua(allmua, allmat, brain_regions):
 
             # Compute mean and std across ALL values (trials AND timepoints)
             mean = test_day_2d.mean()
-            std = test_day_2d.std(ddof=1)
+            std = test_day_2d.std()  # Use ddof=0 (default) to match paper's normalization
             std = 1.0 if std == 0 or np.isnan(std) else std
 
             # Average across time for normalization, then normalize
@@ -268,12 +282,12 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     # Load data
-    allmua, allmat = load_mua_data(args.data_dir, args.monkey)
+    allmua, allmat, tb = load_mua_data(args.data_dir, args.monkey)
 
     # Normalize
     print("\nApplying normalization...")
     brain_regions = BRAIN_REGIONS[args.monkey]
-    normalized = normalize_mua(allmua, allmat, brain_regions)
+    normalized = normalize_mua(allmua, allmat, brain_regions, tb)
     train_MUA, test_MUA, test_MUA_reps = average_by_stimulus(normalized, allmat)
 
     print(f"\nResults:")
