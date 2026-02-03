@@ -1,12 +1,12 @@
 #!/bin/bash
 #
-#SBATCH --job-name=timeseries_norm
-#SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/preprocessing/logs/slurm/timeseries_norm.%j.out
-#SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/preprocessing/logs/slurm/timeseries_norm.%j.err
-#SBATCH --time=4:00:00
+#SBATCH --job-name=visualize_norm
+#SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/normalization/logs/slurm/visualize_norm.%j.out
+#SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/normalization/logs/slurm/visualize_norm.%j.err
+#SBATCH --time=2:00:00
 #SBATCH --qos=normal
 #SBATCH -p owners
-#SBATCH --mem=32G
+#SBATCH --mem=16G
 #SBATCH --cpus-per-task=4
 #SBATCH -n 1
 #SBATCH --mail-type=END,FAIL
@@ -46,13 +46,14 @@ cd /oak/stanford/groups/anishm/gtyagi/stsbench/preprocessing
 # Create logs directory if it doesn't exist
 mkdir -p logs/slurm
 
-# Run alternative time-series normalization script
-echo "Starting alternative time-series normalization..."
-python alternative_timeseries_norm.py \
+# Run normalization visualization script
+echo "Starting normalization visualization..."
+python visualize_normalization.py \
     --monkey monkeyF \
     --data_dir /scratch/groups/anishm/tvsd/ \
+    --results_dir /oak/stanford/groups/anishm/gtyagi/stsbench/results/ \
     --output_dir /oak/stanford/groups/anishm/gtyagi/stsbench/results/ \
-    --baseline_window 100 \
-    --bin_width 10
+    --n_trials 10 \
+    --seed 42
 
-echo "Alternative time-series normalization completed!"
+echo "Normalization visualization completed!"

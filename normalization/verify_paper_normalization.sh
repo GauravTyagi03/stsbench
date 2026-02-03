@@ -1,12 +1,12 @@
 #!/bin/bash
 #
-#SBATCH --job-name=visualize_norm
-#SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/preprocessing/logs/slurm/visualize_norm.%j.out
-#SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/preprocessing/logs/slurm/visualize_norm.%j.err
-#SBATCH --time=2:00:00
+#SBATCH --job-name=verify_paper_norm
+#SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/normalization/logs/slurm/verify_paper_norm.%j.out
+#SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/normalization/logs/slurm/verify_paper_norm.%j.err
+#SBATCH --time=4:00:00
 #SBATCH --qos=normal
 #SBATCH -p owners
-#SBATCH --mem=16G
+#SBATCH --mem=128G
 #SBATCH --cpus-per-task=4
 #SBATCH -n 1
 #SBATCH --mail-type=END,FAIL
@@ -17,6 +17,7 @@ module purge
 # 2. Load ONLY what is necessary for the interpreter and drivers
 module load python/3.12.1
 module load hdf5/1.14.4
+module load openblas/0.3.26
 
 # 3. Aggressive path cleaning
 unset PYTHONPATH
@@ -41,19 +42,16 @@ export VECLIB_MAXIMUM_THREADS=${N}
 export NUMEXPR_NUM_THREADS=${N}
 
 # Change to preprocessing directory
-cd /oak/stanford/groups/anishm/gtyagi/stsbench/preprocessing
+cd /oak/stanford/groups/anishm/gtyagi/stsbench/normalization
 
 # Create logs directory if it doesn't exist
 mkdir -p logs/slurm
 
-# Run normalization visualization script
-echo "Starting normalization visualization..."
-python visualize_normalization.py \
+# Run paper normalization verification script
+echo "Starting paper normalization verification..."
+python verify_paper_normalization_v2.py \
     --monkey monkeyF \
     --data_dir /scratch/groups/anishm/tvsd/ \
-    --results_dir /oak/stanford/groups/anishm/gtyagi/stsbench/results/ \
-    --output_dir /oak/stanford/groups/anishm/gtyagi/stsbench/results/ \
-    --n_trials 10 \
-    --seed 42
+    --output_dir /oak/stanford/groups/anishm/gtyagi/stsbench/results/
 
-echo "Normalization visualization completed!"
+echo "Paper normalization verification completed!"
