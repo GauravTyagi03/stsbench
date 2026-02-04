@@ -41,7 +41,7 @@ export VECLIB_MAXIMUM_THREADS=${N}
 export NUMEXPR_NUM_THREADS=${N}
 
 # Change to preprocessing directory
-cd /oak/stanford/groups/anishm/gtyagi/stsbench/preprocessing
+cd /oak/stanford/groups/anishm/gtyagi/stsbench/normalization
 
 # Create logs directory if it doesn't exist
 mkdir -p logs/slurm
@@ -51,8 +51,8 @@ echo "Starting normalization visualization..."
 python visualize_normalization.py \
     --monkey monkeyF \
     --data_dir /scratch/groups/anishm/tvsd/ \
-    --results_dir /oak/stanford/groups/anishm/gtyagi/stsbench/results/ \
-    --output_dir /oak/stanford/groups/anishm/gtyagi/stsbench/results/ \
+    --results_dir /oak/stanford/groups/anishm/gtyagi/stsbench/normalization/results/ \
+    --output_dir /oak/stanford/groups/anishm/gtyagi/stsbench/normalization/results/ \
     --n_trials 10 \
     --seed 42
 

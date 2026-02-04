@@ -43,18 +43,19 @@ class TimeseriesNormalization:
 
     def stage1_baseline_norm(self, allmua: np.ndarray) -> Tuple[np.ndarray, Dict]:
         """
-        Stage 1: Trial-wise baseline normalization.
+        Stage 1: Trial-wise baseline normalization (in-place).
 
         Normalize each trial using its own baseline period (first N timepoints).
+        Modifies allmua in place to avoid a second full-size copy.
 
         Args:
             allmua: (n_timepoints, n_electrodes, n_trials)
 
         Returns:
-            baseline_normalized: (n_timepoints, n_electrodes, n_trials)
+            allmua: same array, now baseline-normalized (n_timepoints, n_electrodes, n_trials)
             stats: Dictionary with baseline statistics
         """
-        print("\nStage 1: Baseline normalization")
+        print("\nStage 1: Baseline normalization (in-place)")
         print(f"  Using first {self.baseline_window} timepoints as baseline")
 
         n_timepoints, n_electrodes, n_trials = allmua.shape
@@ -70,8 +71,9 @@ class TimeseriesNormalization:
         zero_std_count = np.sum(baseline_std == 0)
         baseline_std[baseline_std == 0] = 1.0
 
-        # Normalize all timepoints using baseline statistics
-        baseline_normalized = (allmua - baseline_mean) / baseline_std
+        # Normalize in place to avoid allocating a second full-size array
+        allmua -= baseline_mean
+        allmua /= baseline_std
 
         stats = {
             'baseline_window': self.baseline_window,
@@ -86,11 +88,11 @@ class TimeseriesNormalization:
         print(f"  Mean baseline std: {stats['mean_baseline_std']:.4f}")
 
         # Verify baseline normalization
-        baseline_check = baseline_normalized[:self.baseline_window, :, :]
+        baseline_check = allmua[:self.baseline_window, :, :]
         print(f"  Verification - baseline period mean: {baseline_check.mean():.6f}")
         print(f"  Verification - baseline period std: {baseline_check.std():.6f}")
 
-        return baseline_normalized, stats
+        return allmua, stats
 
     def bin_timeseries(self, data: np.ndarray) -> np.ndarray:
         """
@@ -278,11 +280,11 @@ def load_mua_data(data_dir: str, monkey_name: str) -> Tuple[np.ndarray, np.ndarr
     data_file = os.path.join(data_dir, f'{monkey_name}_THINGS_MUA_trials.mat')
 
     with h5py.File(data_file, 'r') as f:
-        # Load ALLMUA and ALLMAT
-        allmua = np.array(f['ALLMUA'])
+        # Load ALLMUA and ALLMAT (single read)
+        data = np.array(f['ALLMUA'])
         allmat = np.array(f['ALLMAT'])
 
-    print(f"Loaded ALLMUA shape: {allmua.shape}")
+    print(f"Loaded ALLMUA shape: {data.shape}")
     print(f"Loaded ALLMAT shape: {allmat.shape}")
 
     # Load channel mapping - flexible search for any mapping file
@@ -297,15 +299,15 @@ def load_mua_data(data_dir: str, monkey_name: str) -> Tuple[np.ndarray, np.ndarr
     mapping_data = loadmat(mapping_file)
     mapping = mapping_data['mapping'].flatten() - 1  # Convert to 0-indexed
 
-    print(f"Applying channel mapping...")
-    allmua = allmua[..., mapping]
+    # Apply mapping and transpose in one step to keep only one full-size copy in memory
+    # h5py loads as (n_timepoints, n_trials, n_electrodes) -> we want (n_timepoints, n_electrodes, n_trials)
+    print(f"Applying channel mapping and transpose (single copy)...")
+    allmua = np.ascontiguousarray(data[..., mapping].transpose(0, 2, 1))
+    del data
 
-    # h5py loads data as (n_timepoints, n_trials, n_electrodes)
-    # Need to transpose to (n_timepoints, n_electrodes, n_trials)
-    print(f"Transposing from {allmua.shape} to (timepoints, electrodes, trials)")
-    allmua = np.transpose(allmua, (0, 2, 1))
-
-    print(f"Final ALLMUA shape: {allmua.shape}")
+    # Use float32 to halve memory (sufficient precision for normalization)
+    allmua = allmua.astype(np.float32)
+    print(f"Final ALLMUA shape: {allmua.shape}, dtype: {allmua.dtype}")
     return allmua, allmat
 
 
@@ -384,13 +386,14 @@ def main():
     print(f"Final mean: {metadata['final_mean']:.6f}")
     print(f"Final std: {metadata['final_std']:.6f}")
 
-    # Save baseline-normalized data (intermediate result)
+    # Save baseline-normalized data (intermediate result), then free to reduce peak memory
     baseline_file = os.path.join(args.output_dir, f'{args.monkey}_baseline_normalized.mat')
     print(f"\nSaving baseline-normalized data to {baseline_file}")
     savemat(baseline_file, {
         'baseline_normalized': baseline_normalized,
         'baseline_window': args.baseline_window
     })
+    del baseline_normalized  # Free full-size array before saving final outputs
 
     # Save final normalized data
     final_file = os.path.join(args.output_dir, f'{args.monkey}_timeseries_normalized.mat')
