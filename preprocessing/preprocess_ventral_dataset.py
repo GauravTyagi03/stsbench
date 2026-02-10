@@ -15,8 +15,30 @@
 # %%
 import numpy as np
 import h5py
-import pickle 
+import pickle
 import os
+from scipy.io import loadmat
+
+
+def load_mat_file(filepath):
+    """
+    Load .mat file with automatic format detection.
+
+    Tries HDF5/MATLAB v7.3 format first (h5py), falls back to
+    MATLAB v5 format (scipy.io.loadmat) if needed.
+
+    Returns:
+        dict: Data loaded from the .mat file
+    """
+    try:
+        # Try HDF5 format first (MATLAB v7.3)
+        with h5py.File(filepath, "r") as f:
+            data = {key: np.array(f[key]) for key in f.keys() if not key.startswith('#')}
+        return data
+    except (OSError, IOError):
+        # Fall back to MATLAB v5 format
+        print(f"  Note: Loading {os.path.basename(filepath)} with scipy (MATLAB v5 format)")
+        return loadmat(filepath)
 
 # paths
 #normMUA_paths = ['/scratch/groups/anishm/tvsd/monkeyF_THINGS_normMUA.mat', '/scratch/groups/anishm/tvsd/monkeyN_THINGS_normMUA.mat']
@@ -36,22 +58,25 @@ all_train = []
 all_test = []
 
 for normMUA_path in normMUA_paths:
-    with h5py.File(normMUA_path, "r") as f:
-        if "monkeyN" in normMUA_path:
-            v4_range = v4_range_N
-        elif "monkeyF" in normMUA_path: 
-            v4_range = v4_range_F
-        else:
-            raise ValueError(0)
+    # Load with automatic format detection
+    data = load_mat_file(normMUA_path)
 
-        train_MUA = np.array(f["train_MUA"])[:, v4_range[0]:v4_range[1]]        # shape: (n_train_stimuli, n_electrodes)
-        test_MUA = np.array(f["test_MUA"][:, v4_range[0]:v4_range[1]])          # shape: (n_test_stimuli, n_electrodes)
-        reliab = np.mean(np.array(f["reliab"]), 0)[v4_range[0]:v4_range[1]]  # shape: (n_electrodes)
-        oracle = np.array(f["oracle"])[v4_range[0]:v4_range[1]]            # shape: (n_electrodes)
-        all_oracle.append(oracle)
-        all_reliab.append(reliab)
-        all_train.append(train_MUA)
-        all_test.append(test_MUA)
+    if "monkeyN" in normMUA_path:
+        v4_range = v4_range_N
+    elif "monkeyF" in normMUA_path:
+        v4_range = v4_range_F
+    else:
+        raise ValueError(0)
+
+    train_MUA = data["train_MUA"][:, v4_range[0]:v4_range[1]]        # shape: (n_train_stimuli, n_electrodes)
+    test_MUA = data["test_MUA"][:, v4_range[0]:v4_range[1]]          # shape: (n_test_stimuli, n_electrodes)
+    reliab = np.mean(data["reliab"], 0)[v4_range[0]:v4_range[1]]    # shape: (n_electrodes)
+    oracle = data["oracle"][v4_range[0]:v4_range[1]]                # shape: (n_electrodes)
+
+    all_oracle.append(oracle)
+    all_reliab.append(reliab)
+    all_train.append(train_MUA)
+    all_test.append(test_MUA)
 
 oracle = np.concatenate(all_oracle)
 reliab = np.concatenate(all_reliab)
