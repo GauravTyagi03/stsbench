@@ -5,7 +5,7 @@
 #SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/preprocessing/preprocess_ventral.%j.err
 #SBATCH --time=2:00:00
 #SBATCH --qos=normal
-#SBATCH -p owners
+#SBATCH -p anishm
 #SBATCH --mem=8G
 #SBATCH -n 1
 #SBATCH --mail-type=END,FAIL
