@@ -15,7 +15,11 @@ import numpy as np
 from scipy.io import loadmat
 import matplotlib.pyplot as plt
 import os
+import sys
 from typing import Tuple
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from alternative_timeseries_norm import load_normalized_h5
 
 
 def load_data(data_dir: str, results_dir: str, monkey_name: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -40,13 +44,18 @@ def load_data(data_dir: str, results_dir: str, monkey_name: str) -> Tuple[np.nda
     raw = raw[..., mapping]
     raw = np.transpose(raw, (0, 2, 1))  # (timepoints, electrodes, trials)
 
-    # Load normalized data
-    norm_file = os.path.join(results_dir, f'{monkey_name}_timeseries_normalized.mat')
-    if not os.path.exists(norm_file):
-        raise FileNotFoundError(f"Normalized data not found: {norm_file}")
-
-    norm_data = loadmat(norm_file)
-    normalized = norm_data['timeseries_normalized']
+    # Load normalized data (prefer HDF5 for partial loading; fall back to .mat)
+    norm_file_h5 = os.path.join(results_dir, f'{monkey_name}_timeseries_normalized.h5')
+    norm_file_mat = os.path.join(results_dir, f'{monkey_name}_timeseries_normalized.mat')
+    if os.path.exists(norm_file_h5):
+        normalized = load_normalized_h5(norm_file_h5, key='timeseries_normalized')
+    elif os.path.exists(norm_file_mat):
+        norm_data = loadmat(norm_file_mat)
+        normalized = norm_data['timeseries_normalized']
+    else:
+        raise FileNotFoundError(
+            f"Normalized data not found. Looked for: {norm_file_h5!r}, {norm_file_mat!r}"
+        )
 
     print(f"  Raw: {raw.shape}, Normalized: {normalized.shape}")
     print(f"  Time base: {tb.min():.1f} to {tb.max():.1f} ms")

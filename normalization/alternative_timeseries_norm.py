@@ -5,6 +5,11 @@ This script implements a two-stage normalization approach:
 1. Stage 1: Trial-wise baseline normalization using first 100ms
 2. Stage 2: Per-(electrode, day, bin) normalization using test pool statistics
 
+Outputs are written as HDF5 (.h5) for large arrays so you can load slices and reduce memory:
+  - baseline: {monkey}_baseline_normalized.h5  dataset 'baseline_normalized', attr 'baseline_window'
+  - final:    {monkey}_timeseries_normalized.h5 dataset 'timeseries_normalized', attrs 'bin_width', 'n_bins'
+Use load_normalized_h5(path, key=..., load_slice=(slice(0,1000), slice(None), slice(None))) for partial reads.
+
 Usage:
     python alternative_timeseries_norm.py --monkey monkeyF
     python alternative_timeseries_norm.py --monkey monkeyN --baseline_window 100 --bin_width 10
@@ -13,15 +18,54 @@ Usage:
 import argparse
 import h5py
 import numpy as np
-from scipy.io import loadmat, savemat
+from scipy.io import loadmat
 import os
 import sys
 import json
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional, Union
 from pathlib import Path
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# HDF5 chunk size along first axis for efficient partial reads (time/bins)
+HDF5_CHUNK_AXIS0 = 2000
+
+
+def _write_h5_array(f: "h5py.File", key: str, arr: np.ndarray, axis0_chunk: int = HDF5_CHUNK_AXIS0) -> None:
+    """Create a chunked dataset and write array in blocks along axis 0 to limit memory during write."""
+    n0 = arr.shape[0]
+    chunk_len = min(axis0_chunk, n0) if n0 else 1
+    chunks = (chunk_len,) + tuple(arr.shape[1:])
+    dset = f.create_dataset(key, shape=arr.shape, dtype=arr.dtype, chunks=chunks, compression='gzip')
+    step = chunk_len
+    for start in range(0, n0, step):
+        end = min(start + step, n0)
+        dset[start:end] = arr[start:end]
+
+
+def load_normalized_h5(
+    filepath: str,
+    key: str = 'timeseries_normalized',
+    load_slice: Optional[Tuple[Union[slice, int], ...]] = None,
+) -> np.ndarray:
+    """Load normalized data from an HDF5 file (optionally a slice to reduce memory).
+
+    Args:
+        filepath: Path to .h5 file.
+        key: Dataset name ('timeseries_normalized' or 'baseline_normalized').
+        load_slice: Optional tuple of slices, e.g. (slice(0, 1000), slice(None), slice(0, 10))
+                    to load only part of the array. If None, loads the full array.
+
+    Returns:
+        NumPy array (full or sliced). Attributes (bin_width, n_bins, baseline_window) are
+        stored on the file's root or the dataset; access via h5py.File(filepath)['/'].attrs.
+    """
+    with h5py.File(filepath, 'r') as f:
+        dset = f[key]
+        if load_slice is not None:
+            return dset[load_slice]
+        return dset[:]
 
 
 class TimeseriesNormalization:
@@ -386,23 +430,21 @@ def main():
     print(f"Final mean: {metadata['final_mean']:.6f}")
     print(f"Final std: {metadata['final_std']:.6f}")
 
-    # Save baseline-normalized data (intermediate result), then free to reduce peak memory
-    baseline_file = os.path.join(args.output_dir, f'{args.monkey}_baseline_normalized.mat')
+    # Save baseline-normalized data (intermediate result) as HDF5 for large arrays and partial loading
+    baseline_file = os.path.join(args.output_dir, f'{args.monkey}_baseline_normalized.h5')
     print(f"\nSaving baseline-normalized data to {baseline_file}")
-    savemat(baseline_file, {
-        'baseline_normalized': baseline_normalized,
-        'baseline_window': args.baseline_window
-    })
+    with h5py.File(baseline_file, 'w') as f:
+        _write_h5_array(f, 'baseline_normalized', baseline_normalized)
+        f.attrs['baseline_window'] = args.baseline_window
     del baseline_normalized  # Free full-size array before saving final outputs
 
-    # Save final normalized data
-    final_file = os.path.join(args.output_dir, f'{args.monkey}_timeseries_normalized.mat')
+    # Save final normalized data as HDF5
+    final_file = os.path.join(args.output_dir, f'{args.monkey}_timeseries_normalized.h5')
     print(f"Saving final normalized data to {final_file}")
-    savemat(final_file, {
-        'timeseries_normalized': final_normalized,
-        'bin_width': args.bin_width,
-        'n_bins': final_normalized.shape[0]
-    })
+    with h5py.File(final_file, 'w') as f:
+        _write_h5_array(f, 'timeseries_normalized', final_normalized)
+        f.attrs['bin_width'] = args.bin_width
+        f.attrs['n_bins'] = final_normalized.shape[0]
 
     # Save metadata as JSON
     metadata_file = os.path.join(args.output_dir, f'{args.monkey}_normalization_metadata.json')
