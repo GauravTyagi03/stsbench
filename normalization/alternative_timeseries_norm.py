@@ -37,9 +37,9 @@ def _write_h5_array(f: "h5py.File", key: str, arr: np.ndarray, axis0_chunk: int 
     n0 = arr.shape[0]
     chunk_len = min(axis0_chunk, n0) if n0 else 1
 
-    # Calculate chunk size that stays under 4GB element limit
-    # HDF5 has a hard limit of 4GB elements per chunk
-    max_chunk_elements = 4 * 1024**3  # 4 billion elements (not bytes)
+    # HDF5 has a hard limit of 4GB per chunk (in bytes)
+    max_chunk_bytes = 4 * 1024**3  # 4GB
+    max_chunk_elements = max_chunk_bytes // arr.dtype.itemsize
 
     # Start with initial chunks
     chunks = [chunk_len] + list(arr.shape[1:])
@@ -47,18 +47,25 @@ def _write_h5_array(f: "h5py.File", key: str, arr: np.ndarray, axis0_chunk: int 
     # Calculate total elements in proposed chunk
     total_elements = np.prod(chunks)
 
-    # If chunk is too large, reduce dimensions starting from the last
-    if total_elements > max_chunk_elements:
-        # Reduce last dimension(s) to fit under limit
-        reduction_factor = int(np.ceil(total_elements / max_chunk_elements))
-        # Reduce the last dimension (trials) to fit
-        if len(chunks) > 1:
-            chunks[-1] = max(1, chunks[-1] // reduction_factor)
-        # If still too large, reduce second-to-last dimension too
-        if np.prod(chunks) > max_chunk_elements and len(chunks) > 2:
-            chunks[-2] = max(1, chunks[-2] // 2)
+    # If chunk is too large, reduce dimensions to fit under limit
+    while total_elements > max_chunk_elements:
+        # Reduce the last dimension first (trials), then work backwards
+        for i in range(len(chunks) - 1, 0, -1):  # Don't modify first dimension
+            if chunks[i] > 1:
+                # Reduce by half or to 1, whichever is larger
+                chunks[i] = max(1, chunks[i] // 2)
+                total_elements = np.prod(chunks)
+                if total_elements <= max_chunk_elements:
+                    break
+        # Safety check: if we still can't fit, reduce first dimension too
+        if total_elements > max_chunk_elements and chunks[0] > 1:
+            chunks[0] = max(1, chunks[0] // 2)
+            total_elements = np.prod(chunks)
 
     chunks = tuple(chunks)
+    print(f"  Creating dataset '{key}' with shape {arr.shape}, chunks {chunks}, "
+          f"chunk size: {total_elements * arr.dtype.itemsize / 1024**2:.1f} MB")
+
     dset = f.create_dataset(key, shape=arr.shape, dtype=arr.dtype, chunks=chunks, compression='gzip')
     step = chunk_len
     for start in range(0, n0, step):
