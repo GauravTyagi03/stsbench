@@ -24,6 +24,7 @@ module purge
 module load python/3.12.1
 module load cuda/12.4  # Match the cu12 packages in your pip list
 module load openblas
+module load py-h5py/3.10.0_py312
 
 # 3. Aggressive path cleaning
 unset PYTHONPATH
