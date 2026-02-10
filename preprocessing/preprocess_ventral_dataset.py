@@ -19,7 +19,8 @@ import pickle
 import os
 
 # paths
-normMUA_paths = ['/scratch/groups/anishm/tvsd/monkeyF_THINGS_normMUA.mat', '/scratch/groups/anishm/tvsd/monkeyN_THINGS_normMUA.mat']
+#normMUA_paths = ['/scratch/groups/anishm/tvsd/monkeyF_THINGS_normMUA.mat', '/scratch/groups/anishm/tvsd/monkeyN_THINGS_normMUA.mat']
+normMUA_paths = ['/oak/stanford/groups/anishm/gtyagi/stsbench/results/monkeyN_paper_normalized.mat', '/oak/stanford/groups/anishm/gtyagi/stsbench/results/monkeyF_paper_normalized.mat']
 # things path - this should be the path you downloaded and unzipped the things dataset _things_database_images.zip
 things_folder = "/scratch/groups/anishm/things_dataset/object_images/"
 things_path = "/scratch/groups/anishm/tvsd/monkeyN_things_imgs.mat"

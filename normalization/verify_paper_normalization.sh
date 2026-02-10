@@ -49,7 +49,7 @@ mkdir -p logs/slurm
 
 # Run paper normalization verification script
 echo "Starting paper normalization verification..."
-python verify_paper_normalization_v2.py \
+python verify_paper_normalization.py \
     --monkey monkeyF \
     --data_dir /scratch/groups/anishm/tvsd/ \
     --output_dir /oak/stanford/groups/anishm/gtyagi/stsbench/results/
