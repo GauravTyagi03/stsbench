@@ -4,10 +4,13 @@ Alternative Time-Series Normalization
 This script implements a two-stage normalization approach:
 1. Stage 1: Trial-wise baseline normalization using first 100ms
 2. Stage 2: Per-(electrode, day, bin) normalization using test pool statistics
+   - Normalizes individual timepoints (NOT averaged bins)
+   - Statistics computed from all test pool timepoints within each bin
 
 Outputs are written as HDF5 (.h5) for large arrays so you can load slices and reduce memory:
   - baseline: {monkey}_baseline_normalized.h5  dataset 'baseline_normalized', attr 'baseline_window'
   - final:    {monkey}_timeseries_normalized.h5 dataset 'timeseries_normalized', attrs 'bin_width', 'n_bins'
+            Final output preserves timepoint granularity (shape: n_timepoints × n_electrodes × n_trials)
 Use load_normalized_h5(path, key=..., load_slice=(slice(0,1000), slice(None), slice(None))) for partial reads.
 
 Usage:
@@ -102,7 +105,9 @@ class TimeseriesNormalization:
     Two-stage baseline + temporal bin normalization.
 
     Stage 1: Normalize each trial using its own baseline period
-    Stage 2: Normalize each (electrode, day, bin) using test pool statistics
+    Stage 2: Normalize individual timepoints per (electrode, day, bin) using test pool statistics
+            - Statistics computed from all test pool timepoints within each bin
+            - No averaging of timepoints - output preserves temporal granularity
     """
 
     def __init__(self, baseline_window: int = 100, bin_width: int = 10):
@@ -131,7 +136,7 @@ class TimeseriesNormalization:
         print("\nStage 1: Baseline normalization (in-place)")
         print(f"  Using first {self.baseline_window} timepoints as baseline")
 
-        n_timepoints, n_electrodes, n_trials = allmua.shape
+        _, n_electrodes, n_trials = allmua.shape
 
         # Extract baseline period
         baseline_data = allmua[:self.baseline_window, :, :]  # (baseline_window, n_electrodes, n_trials)
@@ -167,54 +172,43 @@ class TimeseriesNormalization:
 
         return allmua, stats
 
-    def bin_timeseries(self, data: np.ndarray) -> np.ndarray:
-        """
-        Average data into temporal bins.
-
-        Args:
-            data: (n_timepoints, n_electrodes, n_trials)
-
-        Returns:
-            binned: (n_bins, n_electrodes, n_trials)
-        """
-        n_timepoints, n_electrodes, n_trials = data.shape
-        n_bins = n_timepoints // self.bin_width
-
-        # Truncate to fit exact number of bins
-        truncated_length = n_bins * self.bin_width
-        data_truncated = data[:truncated_length, :, :]
-
-        # Reshape and average
-        binned = data_truncated.reshape(n_bins, self.bin_width, n_electrodes, n_trials)
-        binned = binned.mean(axis=1)  # Average within each bin
-
-        print(f"\nBinning timeseries:")
-        print(f"  Original timepoints: {n_timepoints}")
-        print(f"  Bin width: {self.bin_width}")
-        print(f"  Number of bins: {n_bins}")
-        print(f"  Binned shape: {binned.shape}")
-
-        return binned
 
     def stage2_bin_norm(
         self,
-        binned: np.ndarray,
+        baseline_normalized: np.ndarray,
         allmat: np.ndarray
     ) -> Tuple[np.ndarray, Dict]:
         """
         Stage 2: Per-(electrode, day, bin) normalization using test pool statistics.
 
+        Normalizes individual timepoints (NOT averaged bins) by computing statistics
+        from all test pool timepoints within each bin.
+
         Args:
-            binned: (n_bins, n_electrodes, n_trials)
+            baseline_normalized: (n_timepoints, n_electrodes, n_trials)
             allmat: (6, n_trials)
 
         Returns:
-            normalized: (n_bins, n_electrodes, n_trials)
+            normalized: (truncated_length, n_electrodes, n_trials) where
+                       truncated_length = n_bins * bin_width
             stats: Dictionary with normalization statistics
         """
-        print("\nStage 2: Test-pool bin normalization")
+        print("\nStage 2: Test-pool bin normalization (timepoint-level)")
 
-        n_bins, n_electrodes, n_trials = binned.shape
+        n_timepoints, n_electrodes, _ = baseline_normalized.shape
+
+        # Truncate to fit exact number of bins
+        n_bins = n_timepoints // self.bin_width
+        truncated_length = n_bins * self.bin_width
+        data = baseline_normalized[:truncated_length, :, :]
+
+        print(f"  Original timepoints: {n_timepoints}")
+        print(f"  Bin width: {self.bin_width}")
+        print(f"  Number of bins: {n_bins}")
+        print(f"  Truncated length: {truncated_length}")
+
+        # Create bin assignment for each timepoint
+        bin_ids = np.arange(truncated_length) // self.bin_width  # shape: (truncated_length,)
 
         # Extract metadata
         train_idx = allmat[1].astype(np.int32)
@@ -229,12 +223,11 @@ class TimeseriesNormalization:
 
         print(f"  Electrodes: {n_electrodes}")
         print(f"  Days: {len(unique_days)}")
-        print(f"  Bins: {n_bins}")
         print(f"  Train trials: {train_mask.sum()}")
         print(f"  Test trials: {test_mask.sum()}")
 
         # Initialize normalized array
-        normalized = np.zeros_like(binned)
+        normalized = np.zeros_like(data)
 
         # Statistics tracking
         stats = {
@@ -253,30 +246,34 @@ class TimeseriesNormalization:
 
             for day in unique_days:
                 day_mask = (days == day)
+                test_day_mask = day_mask & test_mask
 
                 for bin_idx in range(n_bins):
-                    test_day_mask = day_mask & test_mask
+                    # Get timepoint mask for this bin
+                    timepoint_mask = (bin_ids == bin_idx)
 
-                    # Extract test trials for this (electrode, day, bin)
-                    test_bin_data = binned[bin_idx, elec_idx, test_day_mask]
+                    # Extract ALL test pool timepoints for this (electrode, day, bin)
+                    # Shape: (bin_width, n_test_trials_for_day)
+                    test_bin_timepoints = data[timepoint_mask, elec_idx, :][:, test_day_mask]
 
-                    if len(test_bin_data) == 0:
+                    if test_bin_timepoints.shape[1] == 0:
                         # No test trials - set to zero
-                        normalized[bin_idx, elec_idx, day_mask] = 0
+                        normalized[timepoint_mask, elec_idx, day_mask] = 0
                         stats['no_test_trials'] += 1
                         continue
 
-                    # Compute mean/std from test pool
-                    mean = test_bin_data.mean()
-                    std = test_bin_data.std()
+                    # Compute mean/std from ALL test pool timepoints (flatten across both dimensions)
+                    mean = test_bin_timepoints.mean()
+                    std = test_bin_timepoints.std()
 
                     if std == 0 or np.isnan(std):
                         std = 1.0
                         stats['zero_std'] += 1
 
-                    # Normalize ALL trials in this (electrode, day, bin)
-                    all_day_bin_data = binned[bin_idx, elec_idx, day_mask]
-                    normalized[bin_idx, elec_idx, day_mask] = (all_day_bin_data - mean) / std
+                    # Normalize ALL timepoints for this (electrode, day, bin)
+                    # Shape: (bin_width, n_trials_for_day)
+                    day_bin_timepoints = data[timepoint_mask, elec_idx, :][:, day_mask]
+                    normalized[timepoint_mask, elec_idx, day_mask] = (day_bin_timepoints - mean) / std
 
         # Calculate percentages
         stats['no_test_trials_percentage'] = 100 * stats['no_test_trials'] / stats['total_combinations']
@@ -308,17 +305,15 @@ class TimeseriesNormalization:
 
         Returns:
             baseline_normalized: (n_timepoints, n_electrodes, n_trials)
-            final_normalized: (n_bins, n_electrodes, n_trials)
+            final_normalized: (truncated_length, n_electrodes, n_trials) where
+                            truncated_length = n_bins * bin_width
             metadata: Combined statistics from both stages
         """
         # Stage 1: Baseline normalization
         baseline_normalized, stage1_stats = self.stage1_baseline_norm(allmua)
 
-        # Bin the baseline-normalized data
-        binned = self.bin_timeseries(baseline_normalized)
-
-        # Stage 2: Bin normalization
-        final_normalized, stage2_stats = self.stage2_bin_norm(binned, allmat)
+        # Stage 2: Bin normalization (operates on individual timepoints, not averages)
+        final_normalized, stage2_stats = self.stage2_bin_norm(baseline_normalized, allmat)
 
         # Combine metadata
         metadata = {
@@ -473,7 +468,10 @@ def main():
     with h5py.File(final_file, 'w') as f:
         _write_h5_array(f, 'timeseries_normalized', final_normalized)
         f.attrs['bin_width'] = args.bin_width
-        f.attrs['n_bins'] = final_normalized.shape[0]
+        n_bins = final_normalized.shape[0] // args.bin_width
+        f.attrs['n_bins'] = n_bins
+        f.attrs['n_timepoints'] = final_normalized.shape[0]
+        f.attrs['note'] = 'Output preserves timepoint granularity (not averaged into bins)'
 
     # Save metadata as JSON
     metadata_file = os.path.join(args.output_dir, f'{args.monkey}_normalization_metadata.json')
