@@ -295,14 +295,58 @@ def main():
     print(f"  test_MUA: {test_MUA.shape}")
     print(f"  test_MUA_reps: {test_MUA_reps.shape}")
 
-    # Save
+    # Compute reliability and oracle correlation from test repetitions
+    print("\nComputing reliability and oracle correlation...")
+    n_electrodes = test_MUA_reps.shape[0]
+    n_test_stimuli = test_MUA_reps.shape[1]
+    n_reps = test_MUA_reps.shape[2]
+
+    reliab = np.zeros((n_electrodes, n_test_stimuli))
+    oracle = np.zeros(n_electrodes)
+
+    for elec in range(n_electrodes):
+        if elec % 200 == 0:
+            print(f"  Processing electrode {elec}/{n_electrodes}")
+
+        temp_oracle_vals = []
+
+        for stim_idx in range(n_test_stimuli):
+            # Get all reps for this electrode and stimulus
+            reps = test_MUA_reps[elec, stim_idx, :]
+            # Filter out zeros (padding)
+            valid_reps = reps[reps != 0] if np.any(reps != 0) else reps[:1]
+
+            if len(valid_reps) > 1:
+                # Reliability: average pairwise correlation between reps
+                corr_matrix = np.corrcoef(valid_reps)
+                # Get upper triangle (excluding diagonal)
+                upper_tri = corr_matrix[np.triu_indices_from(corr_matrix, k=1)]
+                reliab[elec, stim_idx] = np.nanmean(upper_tri)
+
+                # Oracle: correlation between each rep and mean of others
+                for i in range(len(valid_reps)):
+                    other_reps = np.delete(valid_reps, i)
+                    if len(other_reps) > 0:
+                        corr_val = np.corrcoef(valid_reps[i:i+1], np.mean(other_reps, keepdims=True))[0, 1]
+                        temp_oracle_vals.append(corr_val)
+            else:
+                reliab[elec, stim_idx] = np.nan
+
+        oracle[elec] = np.nanmean(temp_oracle_vals) if temp_oracle_vals else np.nan
+
+    print(f"  Mean reliability: {np.nanmean(reliab):.4f}")
+    print(f"  Mean oracle: {np.nanmean(oracle):.4f}")
+
+    # Save in HDF5/MATLAB v7.3 format for compatibility with h5py
     output_file = os.path.join(args.output_dir, f'{args.monkey}_paper_normalized.mat')
     scipy.io.savemat(output_file, {
         'train_MUA': train_MUA,
         'test_MUA': test_MUA,
-        'test_MUA_reps': test_MUA_reps
-    })
-    print(f"\nSaved: {output_file}")
+        'test_MUA_reps': test_MUA_reps,
+        'reliab': reliab,
+        'oracle': oracle
+    }, do_compression=True)  # Creates HDF5/MATLAB v7.3 format
+    print(f"\nSaved: {output_file} (HDF5 format)")
 
     # Validate if original exists
     try:
