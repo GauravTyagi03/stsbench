@@ -7,14 +7,15 @@ Implements and validates the paper's normalization:
 3. Average by stimulus ID
 
 Usage:
-    python verify_paper_normalization_v2.py --monkey monkeyF
+    python verify_paper_normalization.py --monkey monkeyF
 """
 
 import argparse
 import h5py
 import numpy as np
 import scipy.io
-from scipy.stats import ks_2samp
+from scipy.stats import ks_2samp, pearsonr
+from scipy.spatial.distance import pdist
 import os
 import matplotlib.pyplot as plt
 
@@ -177,6 +178,61 @@ def average_by_stimulus(normalized, allmat):
     return train_MUA, test_MUA, test_MUA_reps
 
 
+def compute_reliability_oracle(test_MUA_reps):
+    """
+    Compute reliability and oracle correlation from test repetitions.
+    Matches MATLAB logic: correlations across stimuli between repetitions.
+
+    Args:
+        test_MUA_reps: (n_electrodes, n_test_stimuli, n_reps)
+
+    Returns:
+        reliab: (n_electrodes, n_pairs) - pairwise correlations between reps
+        oracle: (n_electrodes,) - average oracle correlation
+    """
+    n_electrodes, n_stimuli, n_reps = test_MUA_reps.shape
+
+    reliab = []
+    oracle = np.zeros(n_electrodes)
+
+    print("\nComputing reliability and oracle...")
+    for elec in range(n_electrodes):
+        if elec % 200 == 0:
+            print(f"  Processing electrode {elec}/{n_electrodes}")
+
+        # Get data for this electrode: (n_stimuli, n_reps)
+        elec_data = test_MUA_reps[elec, :, :]
+
+        # Reliability: pairwise correlations between reps (across stimuli)
+        # pdist computes pairwise correlation distances between columns
+        pairwise_corr = 1 - pdist(elec_data.T, metric='correlation')
+        reliab.append(pairwise_corr)
+
+        # Oracle: correlation between each rep and mean of others
+        oracle_vals = []
+        for rep in range(n_reps):
+            rep_data = elec_data[:, rep]
+            # Mean of all other reps
+            other_reps_idx = [r for r in range(n_reps) if r != rep]
+            if len(other_reps_idx) > 0:
+                mean_others = np.mean(elec_data[:, other_reps_idx], axis=1)
+                # Correlation between this rep and mean of others
+                corr, _ = pearsonr(rep_data, mean_others)
+                if not np.isnan(corr):
+                    oracle_vals.append(corr)
+
+        oracle[elec] = np.mean(oracle_vals) if oracle_vals else np.nan
+
+    # Convert reliab to 2D array (pad shorter arrays with nan)
+    max_pairs = max(len(r) for r in reliab)
+    reliab_array = np.full((n_electrodes, max_pairs), np.nan)
+    for i, r in enumerate(reliab):
+        reliab_array[i, :len(r)] = r
+
+    print(f"  Mean oracle: {np.nanmean(oracle):.4f}")
+    return reliab_array, oracle
+
+
 def validate_and_plot(our_train, our_test, orig_train, orig_test, brain_regions,
                       monkey_name, output_dir):
     """Validate normalization and create comparison plots."""
@@ -295,47 +351,8 @@ def main():
     print(f"  test_MUA: {test_MUA.shape}")
     print(f"  test_MUA_reps: {test_MUA_reps.shape}")
 
-    # Compute reliability and oracle correlation from test repetitions
-    print("\nComputing reliability and oracle correlation...")
-    n_electrodes = test_MUA_reps.shape[0]
-    n_test_stimuli = test_MUA_reps.shape[1]
-    n_reps = test_MUA_reps.shape[2]
-
-    reliab = np.zeros((n_electrodes, n_test_stimuli))
-    oracle = np.zeros(n_electrodes)
-
-    for elec in range(n_electrodes):
-        if elec % 200 == 0:
-            print(f"  Processing electrode {elec}/{n_electrodes}")
-
-        temp_oracle_vals = []
-
-        for stim_idx in range(n_test_stimuli):
-            # Get all reps for this electrode and stimulus
-            reps = test_MUA_reps[elec, stim_idx, :]
-            # Filter out zeros (padding)
-            valid_reps = reps[reps != 0] if np.any(reps != 0) else reps[:1]
-
-            if len(valid_reps) > 1:
-                # Reliability: average pairwise correlation between reps
-                corr_matrix = np.corrcoef(valid_reps)
-                # Get upper triangle (excluding diagonal)
-                upper_tri = corr_matrix[np.triu_indices_from(corr_matrix, k=1)]
-                reliab[elec, stim_idx] = np.nanmean(upper_tri)
-
-                # Oracle: correlation between each rep and mean of others
-                for i in range(len(valid_reps)):
-                    other_reps = np.delete(valid_reps, i)
-                    if len(other_reps) > 0:
-                        corr_val = np.corrcoef(valid_reps[i:i+1], np.mean(other_reps, keepdims=True))[0, 1]
-                        temp_oracle_vals.append(corr_val)
-            else:
-                reliab[elec, stim_idx] = np.nan
-
-        oracle[elec] = np.nanmean(temp_oracle_vals) if temp_oracle_vals else np.nan
-
-    print(f"  Mean reliability: {np.nanmean(reliab):.4f}")
-    print(f"  Mean oracle: {np.nanmean(oracle):.4f}")
+    # Compute reliability and oracle
+    reliab, oracle = compute_reliability_oracle(test_MUA_reps)
 
     # Save in HDF5/MATLAB v7.3 format for compatibility with h5py
     output_file = os.path.join(args.output_dir, f'{args.monkey}_paper_normalized.mat')
