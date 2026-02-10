@@ -36,7 +36,29 @@ def _write_h5_array(f: "h5py.File", key: str, arr: np.ndarray, axis0_chunk: int 
     """Create a chunked dataset and write array in blocks along axis 0 to limit memory during write."""
     n0 = arr.shape[0]
     chunk_len = min(axis0_chunk, n0) if n0 else 1
-    chunks = (chunk_len,) + tuple(arr.shape[1:])
+
+    # Calculate chunk size that stays under 4GB element limit
+    # HDF5 has a hard limit of 4GB elements per chunk
+    max_chunk_elements = 4 * 1024**3  # 4 billion elements (not bytes)
+
+    # Start with initial chunks
+    chunks = [chunk_len] + list(arr.shape[1:])
+
+    # Calculate total elements in proposed chunk
+    total_elements = np.prod(chunks)
+
+    # If chunk is too large, reduce dimensions starting from the last
+    if total_elements > max_chunk_elements:
+        # Reduce last dimension(s) to fit under limit
+        reduction_factor = int(np.ceil(total_elements / max_chunk_elements))
+        # Reduce the last dimension (trials) to fit
+        if len(chunks) > 1:
+            chunks[-1] = max(1, chunks[-1] // reduction_factor)
+        # If still too large, reduce second-to-last dimension too
+        if np.prod(chunks) > max_chunk_elements and len(chunks) > 2:
+            chunks[-2] = max(1, chunks[-2] // 2)
+
+    chunks = tuple(chunks)
     dset = f.create_dataset(key, shape=arr.shape, dtype=arr.dtype, chunks=chunks, compression='gzip')
     step = chunk_len
     for start in range(0, n0, step):
