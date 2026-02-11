@@ -259,7 +259,7 @@ def main():
 
     # Load data once (efficient!)
     raw, normalized, allmat, tb = load_data(args.data_dir, args.results_dir, args.monkey)
-    n_timepoints, n_electrodes, n_trials = raw.shape
+    _, n_electrodes, n_trials = raw.shape
 
     # Select trials intelligently or use provided
     if args.trial1_idx is None or args.trial2_idx is None:
@@ -282,14 +282,31 @@ def main():
 
     raw1 = raw[:, electrode1_idx, trial1_idx]
     raw2 = raw[:, electrode2_idx, trial2_idx]
-    norm1 = normalized[:, electrode1_idx, trial1_idx]
-    norm2 = normalized[:, electrode2_idx, trial2_idx]
+
+    # Bin the normalized timepoint data for visualization
+    # NOTE: normalized has shape (n_timepoints, n_electrodes, n_trials) - NOT binned!
+    # We average into bins here for cleaner visualization
+    n_timepoints_norm = normalized.shape[0]
+    n_bins = n_timepoints_norm // args.bin_width
+    truncated_length = n_bins * args.bin_width
+
+    print(f"\nBinning normalized data for visualization:")
+    print(f"  Normalized timepoints: {n_timepoints_norm}")
+    print(f"  Bin width: {args.bin_width}")
+    print(f"  Number of bins: {n_bins}")
+
+    # Reshape and average into bins for plotting
+    norm_truncated = normalized[:truncated_length]  # (truncated_length, n_electrodes, n_trials)
+    norm_binned = norm_truncated.reshape(n_bins, args.bin_width, n_electrodes, n_trials).mean(axis=1)
+    # Shape: (n_bins, n_electrodes, n_trials)
+
+    norm1 = norm_binned[:, electrode1_idx, trial1_idx]
+    norm2 = norm_binned[:, electrode2_idx, trial2_idx]
 
     # Compute average across ALL trials for electrode1
-    norm_avg_all = normalized[:, electrode1_idx, :].mean(axis=1)
+    norm_avg_all = norm_binned[:, electrode1_idx, :].mean(axis=1)
 
     # Time axes
-    n_bins = normalized.shape[0]
     time_bins = np.arange(n_bins) * args.bin_width + args.bin_width / 2
 
     print("\nGenerating plots...")
