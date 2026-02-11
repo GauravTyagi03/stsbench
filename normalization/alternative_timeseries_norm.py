@@ -143,16 +143,16 @@ class TimeseriesNormalization:
         # Extract baseline period using pre-stimulus timepoints if tb is available
         if self.tb is not None:
             # Find all timepoints where t <= 0 (pre-stimulus)
-            baseline_mask = self.tb <= 0
-            baseline_indices = np.where(baseline_mask)[0]
-            if len(baseline_indices) == 0:
-                # Fallback: use first baseline_window timepoints
-                baseline_indices = np.arange(min(self.baseline_window, allmua.shape[0]))
-                print(f"  Warning: No pre-stimulus timepoints found, using first {len(baseline_indices)} timepoints")
-            baseline_data = allmua[baseline_indices, :, :]
-            actual_baseline_window = len(baseline_indices)
-            print(f"  Using {actual_baseline_window} pre-stimulus timepoints (t <= 0) as baseline")
-            print(f"  Time range: {self.tb[baseline_indices].min():.1f} to {self.tb[baseline_indices].max():.1f} ms")
+            # Use contiguous slicing to avoid memory copy when possible
+            baseline_end = np.searchsorted(self.tb, 0, side='right')
+            if baseline_end == 0:
+                # No pre-stimulus timepoints found
+                baseline_end = min(self.baseline_window, allmua.shape[0])
+                print(f"  Warning: No pre-stimulus timepoints found, using first {baseline_end} timepoints")
+            # Use slicing (creates view, not copy) since baseline is at start
+            baseline_data = allmua[:baseline_end, :, :]
+            print(f"  Using {baseline_end} pre-stimulus timepoints (t <= 0) as baseline")
+            print(f"  Time range: {self.tb[0]:.1f} to {self.tb[baseline_end-1]:.1f} ms")
         else:
             # Fallback to old behavior
             baseline_data = allmua[:self.baseline_window, :, :]
@@ -277,35 +277,36 @@ class TimeseriesNormalization:
                     test_bin_timepoints = data[timepoint_mask, elec_idx, :][:, test_day_mask]
 
                     if test_bin_timepoints.shape[1] == 0:
-                        # Fallback 1: Use ALL test trials across all days
-                        test_all_days_mask = test_mask
-                        test_bin_timepoints_fallback = data[timepoint_mask, elec_idx, :][:, test_all_days_mask]
+                        # Extract day bin data once to reuse across fallbacks
+                        day_bin_timepoints = data[timepoint_mask, elec_idx, :][:, day_mask]
 
-                        if test_bin_timepoints_fallback.shape[1] == 0:
+                        # Fallback 1: Use ALL test trials across all days
+                        test_all_days_timepoints = data[timepoint_mask, elec_idx, :][:, test_mask]
+
+                        if test_all_days_timepoints.shape[1] > 0:
+                            # Use all-day test pool
+                            mean = test_all_days_timepoints.mean()
+                            std = test_all_days_timepoints.std()
+                            if std == 0 or np.isnan(std):
+                                std = 1.0
+                            normalized[timepoint_mask, elec_idx, :][:, day_mask] = (day_bin_timepoints - mean) / std
+                            stats['fallback_all_days'] += 1
+                        else:
                             # Fallback 2: Use train trials for this day
                             train_day_mask = day_mask & train_mask
-                            if train_day_mask.sum() > 0:
+                            train_count = train_day_mask.sum()
+                            if train_count > 0:
                                 train_bin_timepoints = data[timepoint_mask, elec_idx, :][:, train_day_mask]
                                 mean = train_bin_timepoints.mean()
                                 std = train_bin_timepoints.std()
                                 if std == 0 or np.isnan(std):
                                     std = 1.0
-                                day_bin_timepoints = data[timepoint_mask, elec_idx, :][:, day_mask]
                                 normalized[timepoint_mask, elec_idx, :][:, day_mask] = (day_bin_timepoints - mean) / std
-                                stats['fallback_train'] = stats.get('fallback_train', 0) + 1
+                                stats['fallback_train'] += 1
                             else:
                                 # Last resort: set to zero
                                 normalized[timepoint_mask, elec_idx, :][:, day_mask] = 0
-                                stats['no_data_available'] = stats.get('no_data_available', 0) + 1
-                        else:
-                            # Use all-day test pool
-                            mean = test_bin_timepoints_fallback.mean()
-                            std = test_bin_timepoints_fallback.std()
-                            if std == 0 or np.isnan(std):
-                                std = 1.0
-                            day_bin_timepoints = data[timepoint_mask, elec_idx, :][:, day_mask]
-                            normalized[timepoint_mask, elec_idx, :][:, day_mask] = (day_bin_timepoints - mean) / std
-                            stats['fallback_all_days'] = stats.get('fallback_all_days', 0) + 1
+                                stats['no_data_available'] += 1
 
                         stats['no_test_trials'] += 1
                         continue
@@ -470,12 +471,15 @@ def main():
     # Load data
     allmua, allmat, tb = load_mua_data(args.data_dir, args.monkey)
 
-    # Initialize normalizer
+    # Initialize normalizer (tb is stored in normalizer, so we can delete the reference)
     normalizer = TimeseriesNormalization(
         baseline_window=args.baseline_window,
         bin_width=args.bin_width,
         tb=tb
     )
+
+    # Keep a reference to tb for saving later (normalizer.tb is a reference, not a copy)
+    tb_for_saving = normalizer.tb
 
     # Normalize
     print("\nApplying two-stage normalization...")
@@ -517,7 +521,7 @@ def main():
     print(f"\nSaving baseline-normalized data to {baseline_file}")
     with h5py.File(baseline_file, 'w') as f:
         _write_h5_array(f, 'baseline_normalized', baseline_normalized)
-        f.create_dataset('tb', data=tb)
+        f.create_dataset('tb', data=tb_for_saving)
         f.attrs['baseline_window'] = args.baseline_window
     del baseline_normalized  # Free full-size array before saving final outputs
 
@@ -527,7 +531,7 @@ def main():
     with h5py.File(final_file, 'w') as f:
         _write_h5_array(f, 'timeseries_normalized', final_normalized)
         # Save truncated time base matching final_normalized length
-        f.create_dataset('tb', data=tb[:final_normalized.shape[0]])
+        f.create_dataset('tb', data=tb_for_saving[:final_normalized.shape[0]])
         f.attrs['bin_width'] = args.bin_width
         n_bins = final_normalized.shape[0] // args.bin_width
         f.attrs['n_bins'] = n_bins
