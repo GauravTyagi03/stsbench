@@ -354,16 +354,19 @@ def main():
     # Compute reliability and oracle
     reliab, oracle = compute_reliability_oracle(test_MUA_reps)
 
-    # Save in HDF5/MATLAB v7.3 format for compatibility with h5py
+    # Save in HDF5 format directly using h5py (more reliable than scipy.io.savemat)
     output_file = os.path.join(args.output_dir, f'{args.monkey}_paper_normalized.mat')
-    scipy.io.savemat(output_file, {
-        'train_MUA': train_MUA,
-        'test_MUA': test_MUA,
-        'test_MUA_reps': test_MUA_reps,
-        'reliab': reliab,
-        'oracle': oracle
-    }, do_compression=True)  # Creates HDF5/MATLAB v7.3 format
-    print(f"\nSaved: {output_file} (HDF5 format)")
+    print(f"\nSaving to: {output_file}")
+    with h5py.File(output_file, 'w') as f:
+        f.create_dataset('train_MUA', data=train_MUA, compression='gzip', compression_opts=4)
+        f.create_dataset('test_MUA', data=test_MUA, compression='gzip', compression_opts=4)
+        f.create_dataset('test_MUA_reps', data=test_MUA_reps, compression='gzip', compression_opts=4)
+        f.create_dataset('reliab', data=reliab, compression='gzip', compression_opts=4)
+        f.create_dataset('oracle', data=oracle, compression='gzip', compression_opts=4)
+        f.attrs['description'] = 'Paper normalization output'
+        f.attrs['monkey'] = args.monkey
+    print(f"Saved: {output_file} (HDF5 format, gzip compression)")
+    print(f"  File size: {os.path.getsize(output_file) / (1024**3):.2f} GB")
 
     # Validate if original exists
     try:
