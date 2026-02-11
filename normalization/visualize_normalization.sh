@@ -53,7 +53,6 @@ python visualize_normalization.py \
     --data_dir /scratch/groups/anishm/tvsd/ \
     --results_dir /oak/stanford/groups/anishm/gtyagi/stsbench/normalization/results/ \
     --output_dir /oak/stanford/groups/anishm/gtyagi/stsbench/normalization/results/ \
-    --n_trials 10 \
     --seed 42
 
 echo "Normalization visualization completed!"
