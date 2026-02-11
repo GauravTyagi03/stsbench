@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from alternative_timeseries_norm import load_normalized_h5
 
 
-def load_data(data_dir: str, results_dir: str, monkey_name: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def load_data(data_dir: str, results_dir: str, monkey_name: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Load raw and normalized data."""
     print(f"Loading data for {monkey_name}...")
 
@@ -49,18 +49,30 @@ def load_data(data_dir: str, results_dir: str, monkey_name: str) -> Tuple[np.nda
     norm_file_mat = os.path.join(results_dir, f'{monkey_name}_timeseries_normalized.mat')
     if os.path.exists(norm_file_h5):
         normalized = load_normalized_h5(norm_file_h5, key='timeseries_normalized')
+        # Load time base from normalized file
+        with h5py.File(norm_file_h5, 'r') as f:
+            if 'tb' in f:
+                tb_norm = f['tb'][:]
+            else:
+                # Fallback: truncate original tb to match normalized length
+                tb_norm = tb[:normalized.shape[0]]
+                print("  Warning: Time base not found in normalized file, using truncated raw tb")
     elif os.path.exists(norm_file_mat):
         norm_data = loadmat(norm_file_mat)
         normalized = norm_data['timeseries_normalized']
+        # Fallback: truncate original tb to match normalized length
+        tb_norm = tb[:normalized.shape[0]]
+        print("  Warning: Using .mat file, truncating raw tb to match normalized length")
     else:
         raise FileNotFoundError(
             f"Normalized data not found. Looked for: {norm_file_h5!r}, {norm_file_mat!r}"
         )
 
     print(f"  Raw: {raw.shape}, Normalized: {normalized.shape}")
-    print(f"  Time base: {tb.min():.1f} to {tb.max():.1f} ms")
+    print(f"  Raw time base: {tb.min():.1f} to {tb.max():.1f} ms ({len(tb)} timepoints)")
+    print(f"  Normalized time base: {tb_norm.min():.1f} to {tb_norm.max():.1f} ms ({len(tb_norm)} timepoints)")
 
-    return raw, normalized, allmat, tb
+    return raw, normalized, allmat, tb, tb_norm
 
 
 def get_brain_region(electrode_idx: int, monkey_name: str) -> str:
@@ -258,7 +270,7 @@ def main():
     print("="*60)
 
     # Load data once (efficient!)
-    raw, normalized, allmat, tb = load_data(args.data_dir, args.results_dir, args.monkey)
+    raw, normalized, allmat, tb, tb_norm = load_data(args.data_dir, args.results_dir, args.monkey)
     _, n_electrodes, n_trials = raw.shape
 
     # Select trials intelligently or use provided
@@ -306,8 +318,15 @@ def main():
     # Compute average across ALL trials for electrode1
     norm_avg_all = norm_binned[:, electrode1_idx, :].mean(axis=1)
 
-    # Time axes
-    time_bins = np.arange(n_bins) * args.bin_width + args.bin_width / 2
+    # Time axes - use actual time base for binned visualization
+    # Average tb values within each bin to get bin centers
+    time_bins = np.array([tb_norm[i*args.bin_width:(i+1)*args.bin_width].mean()
+                          for i in range(n_bins)])
+
+    print(f"\nTime axis information:")
+    print(f"  Time bins range: {time_bins.min():.1f} to {time_bins.max():.1f} ms")
+    print(f"  Pre-stimulus bins (t < 0): {(time_bins < 0).sum()}/{len(time_bins)}")
+    print(f"  Post-stimulus bins (t >= 0): {(time_bins >= 0).sum()}/{len(time_bins)}")
 
     print("\nGenerating plots...")
 

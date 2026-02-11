@@ -110,14 +110,16 @@ class TimeseriesNormalization:
             - No averaging of timepoints - output preserves temporal granularity
     """
 
-    def __init__(self, baseline_window: int = 100, bin_width: int = 10):
+    def __init__(self, baseline_window: int = 100, bin_width: int = 10, tb: Optional[np.ndarray] = None):
         """
         Args:
             baseline_window: Number of timepoints for baseline (default: 100ms)
             bin_width: Width of temporal bins in timepoints (default: 10ms)
+            tb: Time base array in milliseconds (optional)
         """
         self.baseline_window = baseline_window
         self.bin_width = bin_width
+        self.tb = tb
 
     def stage1_baseline_norm(self, allmua: np.ndarray) -> Tuple[np.ndarray, Dict]:
         """
@@ -138,8 +140,23 @@ class TimeseriesNormalization:
 
         _, n_electrodes, n_trials = allmua.shape
 
-        # Extract baseline period
-        baseline_data = allmua[:self.baseline_window, :, :]  # (baseline_window, n_electrodes, n_trials)
+        # Extract baseline period using pre-stimulus timepoints if tb is available
+        if self.tb is not None:
+            # Find all timepoints where t <= 0 (pre-stimulus)
+            baseline_mask = self.tb <= 0
+            baseline_indices = np.where(baseline_mask)[0]
+            if len(baseline_indices) == 0:
+                # Fallback: use first baseline_window timepoints
+                baseline_indices = np.arange(min(self.baseline_window, allmua.shape[0]))
+                print(f"  Warning: No pre-stimulus timepoints found, using first {len(baseline_indices)} timepoints")
+            baseline_data = allmua[baseline_indices, :, :]
+            actual_baseline_window = len(baseline_indices)
+            print(f"  Using {actual_baseline_window} pre-stimulus timepoints (t <= 0) as baseline")
+            print(f"  Time range: {self.tb[baseline_indices].min():.1f} to {self.tb[baseline_indices].max():.1f} ms")
+        else:
+            # Fallback to old behavior
+            baseline_data = allmua[:self.baseline_window, :, :]
+            print(f"  Warning: No time base provided, using first {self.baseline_window} timepoints")
 
         # Compute mean and std for each (electrode, trial)
         baseline_mean = baseline_data.mean(axis=0, keepdims=True)  # (1, n_electrodes, n_trials)
@@ -235,6 +252,9 @@ class TimeseriesNormalization:
             'n_days': len(unique_days),
             'n_bins': n_bins,
             'no_test_trials': 0,
+            'fallback_all_days': 0,
+            'fallback_train': 0,
+            'no_data_available': 0,
             'zero_std': 0,
             'total_combinations': n_electrodes * len(unique_days) * n_bins
         }
@@ -257,8 +277,36 @@ class TimeseriesNormalization:
                     test_bin_timepoints = data[timepoint_mask, elec_idx, :][:, test_day_mask]
 
                     if test_bin_timepoints.shape[1] == 0:
-                        # No test trials - set to zero
-                        normalized[timepoint_mask, elec_idx, :][:, day_mask] = 0
+                        # Fallback 1: Use ALL test trials across all days
+                        test_all_days_mask = test_mask
+                        test_bin_timepoints_fallback = data[timepoint_mask, elec_idx, :][:, test_all_days_mask]
+
+                        if test_bin_timepoints_fallback.shape[1] == 0:
+                            # Fallback 2: Use train trials for this day
+                            train_day_mask = day_mask & train_mask
+                            if train_day_mask.sum() > 0:
+                                train_bin_timepoints = data[timepoint_mask, elec_idx, :][:, train_day_mask]
+                                mean = train_bin_timepoints.mean()
+                                std = train_bin_timepoints.std()
+                                if std == 0 or np.isnan(std):
+                                    std = 1.0
+                                day_bin_timepoints = data[timepoint_mask, elec_idx, :][:, day_mask]
+                                normalized[timepoint_mask, elec_idx, :][:, day_mask] = (day_bin_timepoints - mean) / std
+                                stats['fallback_train'] = stats.get('fallback_train', 0) + 1
+                            else:
+                                # Last resort: set to zero
+                                normalized[timepoint_mask, elec_idx, :][:, day_mask] = 0
+                                stats['no_data_available'] = stats.get('no_data_available', 0) + 1
+                        else:
+                            # Use all-day test pool
+                            mean = test_bin_timepoints_fallback.mean()
+                            std = test_bin_timepoints_fallback.std()
+                            if std == 0 or np.isnan(std):
+                                std = 1.0
+                            day_bin_timepoints = data[timepoint_mask, elec_idx, :][:, day_mask]
+                            normalized[timepoint_mask, elec_idx, :][:, day_mask] = (day_bin_timepoints - mean) / std
+                            stats['fallback_all_days'] = stats.get('fallback_all_days', 0) + 1
+
                         stats['no_test_trials'] += 1
                         continue
 
@@ -277,10 +325,16 @@ class TimeseriesNormalization:
 
         # Calculate percentages
         stats['no_test_trials_percentage'] = 100 * stats['no_test_trials'] / stats['total_combinations']
+        stats['fallback_all_days_percentage'] = 100 * stats['fallback_all_days'] / stats['total_combinations']
+        stats['fallback_train_percentage'] = 100 * stats['fallback_train'] / stats['total_combinations']
+        stats['no_data_available_percentage'] = 100 * stats['no_data_available'] / stats['total_combinations']
         stats['zero_std_percentage'] = 100 * stats['zero_std'] / stats['total_combinations']
 
         print(f"\nStage 2 Statistics:")
-        print(f"  No test trials: {stats['no_test_trials']} ({stats['no_test_trials_percentage']:.2f}%)")
+        print(f"  No test trials (triggered fallback): {stats['no_test_trials']} ({stats['no_test_trials_percentage']:.2f}%)")
+        print(f"    - Fallback to all-day test pool: {stats['fallback_all_days']} ({stats['fallback_all_days_percentage']:.2f}%)")
+        print(f"    - Fallback to train pool: {stats['fallback_train']} ({stats['fallback_train_percentage']:.2f}%)")
+        print(f"    - No data available (set to 0): {stats['no_data_available']} ({stats['no_data_available_percentage']:.2f}%)")
         print(f"  Zero std: {stats['zero_std']} ({stats['zero_std_percentage']:.2f}%)")
 
         # Verify normalization on test trials
@@ -330,7 +384,7 @@ class TimeseriesNormalization:
         return baseline_normalized, final_normalized, metadata
 
 
-def load_mua_data(data_dir: str, monkey_name: str) -> Tuple[np.ndarray, np.ndarray]:
+def load_mua_data(data_dir: str, monkey_name: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Load MUA data and apply channel mapping.
 
@@ -341,6 +395,7 @@ def load_mua_data(data_dir: str, monkey_name: str) -> Tuple[np.ndarray, np.ndarr
     Returns:
         allmua: (n_timepoints, n_electrodes, n_trials)
         allmat: (6, n_trials)
+        tb: (n_timepoints,) time base in milliseconds
     """
     print(f"Loading data for {monkey_name}...")
 
@@ -348,9 +403,10 @@ def load_mua_data(data_dir: str, monkey_name: str) -> Tuple[np.ndarray, np.ndarr
     data_file = os.path.join(data_dir, f'{monkey_name}_THINGS_MUA_trials.mat')
 
     with h5py.File(data_file, 'r') as f:
-        # Load ALLMUA and ALLMAT (single read)
+        # Load ALLMUA, ALLMAT, and tb (single read)
         data = np.array(f['ALLMUA'])
         allmat = np.array(f['ALLMAT'])
+        tb = np.array(f['tb']).flatten()
 
     print(f"Loaded ALLMUA shape: {data.shape}")
     print(f"Loaded ALLMAT shape: {allmat.shape}")
@@ -376,7 +432,8 @@ def load_mua_data(data_dir: str, monkey_name: str) -> Tuple[np.ndarray, np.ndarr
     # Use float32 to halve memory (sufficient precision for normalization)
     allmua = allmua.astype(np.float32)
     print(f"Final ALLMUA shape: {allmua.shape}, dtype: {allmua.dtype}")
-    return allmua, allmat
+    print(f"Time base: {tb.min():.1f} to {tb.max():.1f} ms ({len(tb)} timepoints)")
+    return allmua, allmat, tb
 
 
 def main():
@@ -411,12 +468,13 @@ def main():
     print("="*60)
 
     # Load data
-    allmua, allmat = load_mua_data(args.data_dir, args.monkey)
+    allmua, allmat, tb = load_mua_data(args.data_dir, args.monkey)
 
     # Initialize normalizer
     normalizer = TimeseriesNormalization(
         baseline_window=args.baseline_window,
-        bin_width=args.bin_width
+        bin_width=args.bin_width,
+        tb=tb
     )
 
     # Normalize
@@ -459,6 +517,7 @@ def main():
     print(f"\nSaving baseline-normalized data to {baseline_file}")
     with h5py.File(baseline_file, 'w') as f:
         _write_h5_array(f, 'baseline_normalized', baseline_normalized)
+        f.create_dataset('tb', data=tb)
         f.attrs['baseline_window'] = args.baseline_window
     del baseline_normalized  # Free full-size array before saving final outputs
 
@@ -467,6 +526,8 @@ def main():
     print(f"Saving final normalized data to {final_file}")
     with h5py.File(final_file, 'w') as f:
         _write_h5_array(f, 'timeseries_normalized', final_normalized)
+        # Save truncated time base matching final_normalized length
+        f.create_dataset('tb', data=tb[:final_normalized.shape[0]])
         f.attrs['bin_width'] = args.bin_width
         n_bins = final_normalized.shape[0] // args.bin_width
         f.attrs['n_bins'] = n_bins
