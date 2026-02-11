@@ -64,6 +64,31 @@ def get_stimulus_datasets(name, stimulus_size=224, transform=None, num_neurons=2
     elif 'ventral' in name.lower():
         train_activity = data['train_activity']
         test_activity = data['test_activity']
+
+        actual_num_neurons = train_activity.shape[1]
+        print(f"Ventral stream loaded {actual_num_neurons} neurons from pickle file")
+
+        # Validate non-empty
+        if actual_num_neurons == 0:
+            raise ValueError(
+                "Ventral pickle file has 0 neurons! Check preprocessing "
+                "and reliability threshold in preprocess_ventral_dataset.py"
+            )
+
+        # Filter to num_neurons if specified
+        if num_neurons is not None:
+            if num_neurons > actual_num_neurons:
+                raise ValueError(
+                    f"Config requests {num_neurons} neurons (neural_embed_dim) but "
+                    f"pickle file only has {actual_num_neurons}. "
+                    f"Update config to match actual data: neural_embed_dim: {actual_num_neurons}"
+                )
+            elif num_neurons < actual_num_neurons:
+                print(f"Subsampling from {actual_num_neurons} to {num_neurons} neurons")
+                np.random.seed(42)
+                selected_indices = np.random.choice(actual_num_neurons, size=num_neurons, replace=False)
+                train_activity = train_activity[:, selected_indices]
+                test_activity = test_activity[:, selected_indices]
     else:
         raise ValueError(f"Name {name} not supported for dataset loading.")   
         

@@ -46,7 +46,7 @@ for normMUA_path in normMUA_paths:
 
         train_MUA = np.array(f["train_MUA"])[:, v4_range[0]:v4_range[1]]        # shape: (n_train_stimuli, n_electrodes)
         test_MUA = np.array(f["test_MUA"])[:, v4_range[0]:v4_range[1]]          # shape: (n_test_stimuli, n_electrodes)
-        reliab = np.mean(np.array(f["reliab"]), 0)[v4_range[0]:v4_range[1]]    # shape: (n_electrodes)
+        reliab = np.mean(np.array(f["reliab"])[v4_range[0]:v4_range[1]], 1)    # shape: (n_electrodes) - slice first, then average across repetitions
         oracle = np.array(f["oracle"])[v4_range[0]:v4_range[1]]                # shape: (n_electrodes)
 
         all_oracle.append(oracle)
