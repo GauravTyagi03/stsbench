@@ -258,7 +258,7 @@ class TimeseriesNormalization:
 
                     if test_bin_timepoints.shape[1] == 0:
                         # No test trials - set to zero
-                        normalized[timepoint_mask, elec_idx, day_mask] = 0
+                        normalized[timepoint_mask, elec_idx, :][:, day_mask] = 0
                         stats['no_test_trials'] += 1
                         continue
 
@@ -273,7 +273,7 @@ class TimeseriesNormalization:
                     # Normalize ALL timepoints for this (electrode, day, bin)
                     # Shape: (bin_width, n_trials_for_day)
                     day_bin_timepoints = data[timepoint_mask, elec_idx, :][:, day_mask]
-                    normalized[timepoint_mask, elec_idx, day_mask] = (day_bin_timepoints - mean) / std
+                    normalized[timepoint_mask, elec_idx, :][:, day_mask] = (day_bin_timepoints - mean) / std
 
         # Calculate percentages
         stats['no_test_trials_percentage'] = 100 * stats['no_test_trials'] / stats['total_combinations']
