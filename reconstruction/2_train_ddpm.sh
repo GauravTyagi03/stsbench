@@ -26,6 +26,7 @@ export PYTHONNOUSERSITE=1
 
 # 4. Activate using the full path to the activate script
 source /oak/stanford/groups/anishm/gtyagi/stsbench/venv/bin/activate
+cd /oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction
 
 # Thread settings for CPU operations
 N=8
