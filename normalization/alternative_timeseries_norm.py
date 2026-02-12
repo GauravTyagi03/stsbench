@@ -3,9 +3,10 @@ Alternative Time-Series Normalization
 
 This script implements a two-stage normalization approach:
 1. Stage 1: Trial-wise baseline normalization using first 100ms
-2. Stage 2: Per-(electrode, day, bin) normalization using test pool statistics
+2. Stage 2: Per-(electrode, day, bin) normalization using ALL trials
    - Normalizes individual timepoints (NOT averaged bins)
-   - Statistics computed from all test pool timepoints within each bin
+   - Statistics computed from all timepoints within each (electrode, day, bin)
+   - Uses all trials (test + train) to ensure dense, robust statistics
 
 Outputs are written as HDF5 (.h5) for large arrays so you can load slices and reduce memory:
   - baseline: {monkey}_baseline_normalized.h5  dataset 'baseline_normalized', attr 'baseline_window'
@@ -26,7 +27,6 @@ import os
 import sys
 import json
 from typing import Tuple, Dict, Optional, Union
-from pathlib import Path
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -105,8 +105,9 @@ class TimeseriesNormalization:
     Two-stage baseline + temporal bin normalization.
 
     Stage 1: Normalize each trial using its own baseline period
-    Stage 2: Normalize individual timepoints per (electrode, day, bin) using test pool statistics
-            - Statistics computed from all test pool timepoints within each bin
+    Stage 2: Normalize individual timepoints per (electrode, day, bin) using ALL trials
+            - Statistics computed from all timepoints within each (electrode, day, bin)
+            - Uses all trials (test + train) to ensure dense, robust statistics
             - No averaging of timepoints - output preserves temporal granularity
     """
 
@@ -196,10 +197,10 @@ class TimeseriesNormalization:
         allmat: np.ndarray
     ) -> Tuple[np.ndarray, Dict]:
         """
-        Stage 2: Per-(electrode, day, bin) normalization using test pool statistics.
+        Stage 2: Per-(electrode, day, bin) normalization using ALL trials.
 
-        Normalizes individual timepoints (NOT averaged bins) by computing statistics
-        from all test pool timepoints within each bin.
+        Simpler approach: Use all available trials for statistics instead of
+        test-only pool (which is too sparse).
 
         Args:
             baseline_normalized: (n_timepoints, n_electrodes, n_trials)
@@ -210,7 +211,7 @@ class TimeseriesNormalization:
                        truncated_length = n_bins * bin_width
             stats: Dictionary with normalization statistics
         """
-        print("\nStage 2: Test-pool bin normalization (timepoint-level)")
+        print("\nStage 2: Per-(electrode, day, bin) normalization (using ALL trials)")
 
         n_timepoints, n_electrodes, _ = baseline_normalized.shape
 
@@ -225,23 +226,15 @@ class TimeseriesNormalization:
         print(f"  Truncated length: {truncated_length}")
 
         # Create bin assignment for each timepoint
-        bin_ids = np.arange(truncated_length) // self.bin_width  # shape: (truncated_length,)
+        bin_ids = np.arange(truncated_length) // self.bin_width
 
         # Extract metadata
-        train_idx = allmat[1].astype(np.int32)
-        test_idx = allmat[2].astype(np.int32)
         days = allmat[5].astype(np.int32)
-
-        # Create masks
-        train_mask = train_idx > 0
-        test_mask = test_idx > 0
-
         unique_days = np.unique(days)
 
         print(f"  Electrodes: {n_electrodes}")
         print(f"  Days: {len(unique_days)}")
-        print(f"  Train trials: {train_mask.sum()}")
-        print(f"  Test trials: {test_mask.sum()}")
+        print(f"  Total trials: {data.shape[2]}")
 
         # Initialize normalized array
         normalized = np.zeros_like(data)
@@ -251,98 +244,51 @@ class TimeseriesNormalization:
             'n_electrodes': n_electrodes,
             'n_days': len(unique_days),
             'n_bins': n_bins,
-            'no_test_trials': 0,
-            'fallback_all_days': 0,
-            'fallback_train': 0,
-            'no_data_available': 0,
             'zero_std': 0,
             'total_combinations': n_electrodes * len(unique_days) * n_bins
         }
 
-        # Normalize each (electrode, day, bin)
+        # Normalize each (electrode, day, bin) using ALL trials from that day
         for elec_idx in range(n_electrodes):
             if elec_idx % 100 == 0:
                 print(f"  Processing electrode {elec_idx}/{n_electrodes}")
 
             for day in unique_days:
                 day_mask = (days == day)
-                test_day_mask = day_mask & test_mask
 
                 for bin_idx in range(n_bins):
                     # Get timepoint mask for this bin
                     timepoint_mask = (bin_ids == bin_idx)
 
-                    # Extract ALL test pool timepoints for this (electrode, day, bin)
-                    # Shape: (bin_width, n_test_trials_for_day)
-                    test_bin_timepoints = data[timepoint_mask, elec_idx, :][:, test_day_mask]
+                    # Extract ALL timepoints for this (electrode, day, bin)
+                    # Shape: (bin_width, n_trials_for_day)
+                    day_bin_timepoints = data[timepoint_mask, elec_idx, :][:, day_mask]
 
-                    if test_bin_timepoints.shape[1] == 0:
-                        # Extract day bin data once to reuse across fallbacks
-                        day_bin_timepoints = data[timepoint_mask, elec_idx, :][:, day_mask]
-
-                        # Fallback 1: Use ALL test trials across all days
-                        test_all_days_timepoints = data[timepoint_mask, elec_idx, :][:, test_mask]
-
-                        if test_all_days_timepoints.shape[1] > 0:
-                            # Use all-day test pool
-                            mean = test_all_days_timepoints.mean()
-                            std = test_all_days_timepoints.std()
-                            if std == 0 or np.isnan(std):
-                                std = 1.0
-                            normalized[timepoint_mask, elec_idx, :][:, day_mask] = (day_bin_timepoints - mean) / std
-                            stats['fallback_all_days'] += 1
-                        else:
-                            # Fallback 2: Use train trials for this day
-                            train_day_mask = day_mask & train_mask
-                            train_count = train_day_mask.sum()
-                            if train_count > 0:
-                                train_bin_timepoints = data[timepoint_mask, elec_idx, :][:, train_day_mask]
-                                mean = train_bin_timepoints.mean()
-                                std = train_bin_timepoints.std()
-                                if std == 0 or np.isnan(std):
-                                    std = 1.0
-                                normalized[timepoint_mask, elec_idx, :][:, day_mask] = (day_bin_timepoints - mean) / std
-                                stats['fallback_train'] += 1
-                            else:
-                                # Last resort: set to zero
-                                normalized[timepoint_mask, elec_idx, :][:, day_mask] = 0
-                                stats['no_data_available'] += 1
-
-                        stats['no_test_trials'] += 1
-                        continue
-
-                    # Compute mean/std from ALL test pool timepoints (flatten across both dimensions)
-                    mean = test_bin_timepoints.mean()
-                    std = test_bin_timepoints.std()
+                    # Compute mean/std from ALL timepoints and trials
+                    mean = day_bin_timepoints.mean()
+                    std = day_bin_timepoints.std()
 
                     if std == 0 or np.isnan(std):
                         std = 1.0
                         stats['zero_std'] += 1
 
-                    # Normalize ALL timepoints for this (electrode, day, bin)
-                    # Shape: (bin_width, n_trials_for_day)
-                    day_bin_timepoints = data[timepoint_mask, elec_idx, :][:, day_mask]
-                    normalized[timepoint_mask, elec_idx, :][:, day_mask] = (day_bin_timepoints - mean) / std
+                    # Normalize
+                    normalized[timepoint_mask, elec_idx, :][:, day_mask] = (
+                        (day_bin_timepoints - mean) / std
+                    )
 
         # Calculate percentages
-        stats['no_test_trials_percentage'] = 100 * stats['no_test_trials'] / stats['total_combinations']
-        stats['fallback_all_days_percentage'] = 100 * stats['fallback_all_days'] / stats['total_combinations']
-        stats['fallback_train_percentage'] = 100 * stats['fallback_train'] / stats['total_combinations']
-        stats['no_data_available_percentage'] = 100 * stats['no_data_available'] / stats['total_combinations']
         stats['zero_std_percentage'] = 100 * stats['zero_std'] / stats['total_combinations']
 
         print(f"\nStage 2 Statistics:")
-        print(f"  No test trials (triggered fallback): {stats['no_test_trials']} ({stats['no_test_trials_percentage']:.2f}%)")
-        print(f"    - Fallback to all-day test pool: {stats['fallback_all_days']} ({stats['fallback_all_days_percentage']:.2f}%)")
-        print(f"    - Fallback to train pool: {stats['fallback_train']} ({stats['fallback_train_percentage']:.2f}%)")
-        print(f"    - No data available (set to 0): {stats['no_data_available']} ({stats['no_data_available_percentage']:.2f}%)")
-        print(f"  Zero std: {stats['zero_std']} ({stats['zero_std_percentage']:.2f}%)")
+        print(f"  Zero std cases: {stats['zero_std']} ({stats['zero_std_percentage']:.2f}%)")
 
-        # Verify normalization on test trials
-        test_values = normalized[:, :, test_mask]
-        print(f"\nTest trial verification:")
-        print(f"  Mean: {test_values.mean():.6f}")
-        print(f"  Std: {test_values.std():.6f}")
+        # Verify normalization
+        print(f"\nNormalized data verification:")
+        print(f"  Mean: {normalized.mean():.6f}")
+        print(f"  Std: {normalized.std():.6f}")
+        print(f"  Min: {normalized.min():.4f}, Max: {normalized.max():.4f}")
+        print(f"  Non-zero fraction: {(np.abs(normalized) > 1e-6).sum() / normalized.size:.2%}")
 
         return normalized, stats
 
