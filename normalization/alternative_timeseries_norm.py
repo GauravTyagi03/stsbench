@@ -213,7 +213,7 @@ class TimeseriesNormalization:
         """
         print("\nStage 2: Per-(electrode, day, bin) normalization (using ALL trials)")
 
-        n_timepoints, n_electrodes, _ = baseline_normalized.shape
+        n_timepoints, n_electrodes, n_trials = baseline_normalized.shape
 
         # Truncate to fit exact number of bins
         n_bins = n_timepoints // self.bin_width
@@ -224,20 +224,25 @@ class TimeseriesNormalization:
         print(f"  Bin width: {self.bin_width}")
         print(f"  Number of bins: {n_bins}")
         print(f"  Truncated length: {truncated_length}")
+        print(f"  Data shape after truncation: {data.shape}")
 
         # Create bin assignment for each timepoint
         bin_ids = np.arange(truncated_length) // self.bin_width
+        print(f"  Bin IDs shape: {bin_ids.shape}")
+        print(f"  Bin IDs range: {bin_ids.min()} to {bin_ids.max()}")
 
         # Extract metadata
         days = allmat[5].astype(np.int32)
         unique_days = np.unique(days)
 
         print(f"  Electrodes: {n_electrodes}")
-        print(f"  Days: {len(unique_days)}")
-        print(f"  Total trials: {data.shape[2]}")
+        print(f"  Days: {len(unique_days)} unique days: {unique_days}")
+        print(f"  Total trials: {n_trials}")
+        print(f"  Days array shape: {days.shape}")
 
         # Initialize normalized array
         normalized = np.zeros_like(data)
+        print(f"  Initialized normalized array shape: {normalized.shape}")
 
         # Statistics tracking
         stats = {
@@ -245,50 +250,127 @@ class TimeseriesNormalization:
             'n_days': len(unique_days),
             'n_bins': n_bins,
             'zero_std': 0,
-            'total_combinations': n_electrodes * len(unique_days) * n_bins
+            'total_combinations': n_electrodes * len(unique_days) * n_bins,
+            'sample_means': [],
+            'sample_stds': [],
+            'sample_input_ranges': [],
+            'sample_output_ranges': []
         }
 
+        print("\n  Starting normalization loop...")
         # Normalize each (electrode, day, bin) using ALL trials from that day
         for elec_idx in range(n_electrodes):
             if elec_idx % 100 == 0:
-                print(f"  Processing electrode {elec_idx}/{n_electrodes}")
+                print(f"\n  --- Processing electrode {elec_idx}/{n_electrodes} ---")
 
-            for day in unique_days:
+            for day_idx, day in enumerate(unique_days):
                 day_mask = (days == day)
+                n_trials_for_day = day_mask.sum()
+
+                # Verbose logging for first electrode and first day
+                if elec_idx % 100 == 0 and day_idx == 0:
+                    print(f"    Day {day}: {n_trials_for_day} trials (mask shape: {day_mask.shape}, sum: {n_trials_for_day})")
 
                 for bin_idx in range(n_bins):
                     # Get timepoint mask for this bin
                     timepoint_mask = (bin_ids == bin_idx)
+                    n_timepoints_in_bin = timepoint_mask.sum()
+
+                    # Verbose logging for first electrode, first day, first 3 bins
+                    verbose = (elec_idx % 100 == 0 and day_idx == 0 and bin_idx < 3)
+
+                    if verbose:
+                        print(f"      Bin {bin_idx}:")
+                        print(f"        Timepoint mask sum: {n_timepoints_in_bin} (expected: {self.bin_width})")
+                        print(f"        Timepoint indices in bin: {np.where(timepoint_mask)[0][:5]}...")
 
                     # Extract ALL timepoints for this (electrode, day, bin)
-                    # Shape: (bin_width, n_trials_for_day)
-                    day_bin_timepoints = data[timepoint_mask, elec_idx, :][:, day_mask]
+                    # Method 1: Using fancy indexing
+                    # First: data[timepoint_mask, elec_idx, :] -> (n_timepoints_in_bin, n_trials)
+                    temp_data = data[timepoint_mask, elec_idx, :]
+                    if verbose:
+                        print(f"        After timepoint mask: shape = {temp_data.shape}")
+                        print(f"        Data range before day mask: [{temp_data.min():.4f}, {temp_data.max():.4f}]")
+                        print(f"        Non-zero fraction: {(np.abs(temp_data) > 1e-6).sum() / temp_data.size:.2%}")
+
+                    # Second: [:, day_mask] -> (n_timepoints_in_bin, n_trials_for_day)
+                    day_bin_timepoints = temp_data[:, day_mask]
+
+                    if verbose:
+                        print(f"        After day mask: shape = {day_bin_timepoints.shape}")
+                        print(f"        Expected shape: ({n_timepoints_in_bin}, {n_trials_for_day})")
+                        print(f"        Data range: [{day_bin_timepoints.min():.4f}, {day_bin_timepoints.max():.4f}]")
+                        print(f"        Sample values: {day_bin_timepoints.flatten()[:10]}")
 
                     # Compute mean/std from ALL timepoints and trials
                     mean = day_bin_timepoints.mean()
                     std = day_bin_timepoints.std()
 
+                    if verbose:
+                        print(f"        Computed mean: {mean:.6f}, std: {std:.6f}")
+
+                    # Store sample statistics
+                    if elec_idx % 100 == 0 and bin_idx % 10 == 0:
+                        stats['sample_means'].append(float(mean))
+                        stats['sample_stds'].append(float(std))
+                        stats['sample_input_ranges'].append([float(day_bin_timepoints.min()),
+                                                             float(day_bin_timepoints.max())])
+
                     if std == 0 or np.isnan(std):
+                        if verbose:
+                            print(f"        WARNING: Zero or NaN std, setting to 1.0")
                         std = 1.0
                         stats['zero_std'] += 1
 
                     # Normalize
-                    normalized[timepoint_mask, elec_idx, :][:, day_mask] = (
-                        (day_bin_timepoints - mean) / std
-                    )
+                    normalized_values = (day_bin_timepoints - mean) / std
+
+                    if verbose:
+                        print(f"        Normalized range: [{normalized_values.min():.4f}, {normalized_values.max():.4f}]")
+                        print(f"        Normalized mean: {normalized_values.mean():.6f}, std: {normalized_values.std():.6f}")
+                        print(f"        Sample normalized values: {normalized_values.flatten()[:10]}")
+
+                    # Assign back to normalized array
+                    normalized[timepoint_mask, elec_idx, :][:, day_mask] = normalized_values
+
+                    # Verify assignment worked
+                    if verbose:
+                        check_values = normalized[timepoint_mask, elec_idx, :][:, day_mask]
+                        print(f"        Verification - retrieved from normalized array:")
+                        print(f"          Shape: {check_values.shape}")
+                        print(f"          Range: [{check_values.min():.4f}, {check_values.max():.4f}]")
+                        print(f"          Mean: {check_values.mean():.6f}, Std: {check_values.std():.6f}")
+                        print(f"          Non-zero fraction: {(np.abs(check_values) > 1e-6).sum() / check_values.size:.2%}")
+
+                        if bin_idx % 10 == 0:
+                            stats['sample_output_ranges'].append([float(check_values.min()),
+                                                                  float(check_values.max())])
 
         # Calculate percentages
         stats['zero_std_percentage'] = 100 * stats['zero_std'] / stats['total_combinations']
 
-        print(f"\nStage 2 Statistics:")
-        print(f"  Zero std cases: {stats['zero_std']} ({stats['zero_std_percentage']:.2f}%)")
+        print(f"\n  Stage 2 Statistics:")
+        print(f"    Zero std cases: {stats['zero_std']} ({stats['zero_std_percentage']:.2f}%)")
+        if stats['sample_means']:
+            print(f"    Sample means (first 10): {stats['sample_means'][:10]}")
+            print(f"    Sample stds (first 10): {stats['sample_stds'][:10]}")
+            print(f"    Sample input ranges (first 5): {stats['sample_input_ranges'][:5]}")
+            print(f"    Sample output ranges (first 5): {stats['sample_output_ranges'][:5]}")
 
         # Verify normalization
-        print(f"\nNormalized data verification:")
-        print(f"  Mean: {normalized.mean():.6f}")
-        print(f"  Std: {normalized.std():.6f}")
-        print(f"  Min: {normalized.min():.4f}, Max: {normalized.max():.4f}")
-        print(f"  Non-zero fraction: {(np.abs(normalized) > 1e-6).sum() / normalized.size:.2%}")
+        print(f"\n  Normalized data verification:")
+        print(f"    Mean: {normalized.mean():.6f}")
+        print(f"    Std: {normalized.std():.6f}")
+        print(f"    Min: {normalized.min():.4f}, Max: {normalized.max():.4f}")
+        print(f"    Non-zero fraction: {(np.abs(normalized) > 1e-6).sum() / normalized.size:.2%}")
+
+        # Check a random slice
+        random_slice = normalized[:100, 0, :10]
+        print(f"\n  Random slice check (first 100 timepoints, electrode 0, first 10 trials):")
+        print(f"    Shape: {random_slice.shape}")
+        print(f"    Mean: {random_slice.mean():.6f}, Std: {random_slice.std():.6f}")
+        print(f"    Range: [{random_slice.min():.4f}, {random_slice.max():.4f}]")
+        print(f"    Non-zero fraction: {(np.abs(random_slice) > 1e-6).sum() / random_slice.size:.2%}")
 
         return normalized, stats
 
