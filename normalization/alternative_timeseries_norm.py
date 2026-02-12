@@ -282,25 +282,28 @@ class TimeseriesNormalization:
                     if verbose:
                         print(f"      Bin {bin_idx}:")
                         print(f"        Timepoint mask sum: {n_timepoints_in_bin} (expected: {self.bin_width})")
-                        print(f"        Timepoint indices in bin: {np.where(timepoint_mask)[0][:5]}...")
 
-                    # Extract ALL timepoints for this (electrode, day, bin)
-                    # Method 1: Using fancy indexing
-                    # First: data[timepoint_mask, elec_idx, :] -> (n_timepoints_in_bin, n_trials)
-                    temp_data = data[timepoint_mask, elec_idx, :]
-                    if verbose:
-                        print(f"        After timepoint mask: shape = {temp_data.shape}")
-                        print(f"        Data range before day mask: [{temp_data.min():.4f}, {temp_data.max():.4f}]")
-                        print(f"        Non-zero fraction: {(np.abs(temp_data) > 1e-6).sum() / temp_data.size:.2%}")
-
-                    # Second: [:, day_mask] -> (n_timepoints_in_bin, n_trials_for_day)
-                    day_bin_timepoints = temp_data[:, day_mask]
+                    # FIXED: Use np.ix_ for proper indexing that allows assignment
+                    # Get the actual timepoint indices and trial indices
+                    timepoint_indices = np.where(timepoint_mask)[0]
+                    trial_indices = np.where(day_mask)[0]
 
                     if verbose:
-                        print(f"        After day mask: shape = {day_bin_timepoints.shape}")
+                        print(f"        Timepoint indices: shape={timepoint_indices.shape}, first 5: {timepoint_indices[:5]}")
+                        print(f"        Trial indices: shape={trial_indices.shape}, first 5: {trial_indices[:5]}")
+
+                    # Use np.ix_ to create proper index arrays
+                    ix = np.ix_(timepoint_indices, trial_indices)
+
+                    # Extract data for this (electrode, day, bin)
+                    day_bin_timepoints = data[:, elec_idx, :][ix]
+
+                    if verbose:
+                        print(f"        Extracted data shape: {day_bin_timepoints.shape}")
                         print(f"        Expected shape: ({n_timepoints_in_bin}, {n_trials_for_day})")
                         print(f"        Data range: [{day_bin_timepoints.min():.4f}, {day_bin_timepoints.max():.4f}]")
                         print(f"        Sample values: {day_bin_timepoints.flatten()[:10]}")
+                        print(f"        Non-zero fraction: {(np.abs(day_bin_timepoints) > 1e-6).sum() / day_bin_timepoints.size:.2%}")
 
                     # Compute mean/std from ALL timepoints and trials
                     mean = day_bin_timepoints.mean()
@@ -330,12 +333,12 @@ class TimeseriesNormalization:
                         print(f"        Normalized mean: {normalized_values.mean():.6f}, std: {normalized_values.std():.6f}")
                         print(f"        Sample normalized values: {normalized_values.flatten()[:10]}")
 
-                    # Assign back to normalized array
-                    normalized[timepoint_mask, elec_idx, :][:, day_mask] = normalized_values
+                    # Assign to normalized array using the same indexing
+                    normalized[:, elec_idx, :][ix] = normalized_values
 
                     # Verify assignment worked
                     if verbose:
-                        check_values = normalized[timepoint_mask, elec_idx, :][:, day_mask]
+                        check_values = normalized[:, elec_idx, :][ix]
                         print(f"        Verification - retrieved from normalized array:")
                         print(f"          Shape: {check_values.shape}")
                         print(f"          Range: [{check_values.min():.4f}, {check_values.max():.4f}]")
