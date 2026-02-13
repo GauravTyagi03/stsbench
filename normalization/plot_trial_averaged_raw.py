@@ -199,71 +199,82 @@ def plot_trial_averaged_timeseries(tb, trial_avg, electrode_indices, monkey_name
     plt.close()
 
 
-def plot_heatmap_sorted_by_peak(tb, trial_avg, monkey_name, output_path, vmin=None, vmax=None):
+def plot_trial_by_trial_heatmaps(tb, allmua, electrode_indices, monkey_name, output_path):
     """
-    Plot heatmap of trial-averaged responses sorted by peak time.
+    Plot trial-by-trial heatmaps for selected electrodes.
+    Shows how individual trials vary around the mean response.
 
     Args:
         tb: (n_timepoints,) - time base
-        trial_avg: (n_timepoints, n_electrodes)
+        allmua: (n_timepoints, n_trials, n_electrodes) - raw data
+        electrode_indices: list of electrode indices to plot
         monkey_name: str
         output_path: str
-        vmin, vmax: colorbar limits (optional)
     """
-    print("\nGenerating heatmap sorted by peak time...")
+    print("\nGenerating trial-by-trial heatmaps...")
 
-    # Find peak times
-    peak_times, peak_indices = find_peak_time(trial_avg, tb)
+    n_electrodes = len(electrode_indices)
+    n_cols = 3
+    n_rows = int(np.ceil(n_electrodes / n_cols))
 
-    # Sort electrodes by peak time
-    sort_order = np.argsort(peak_times)
-    trial_avg_sorted = trial_avg[:, sort_order]
-    peak_times_sorted = peak_times[sort_order]
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(18, 5 * n_rows))
+    axes = axes.flatten() if n_electrodes > 1 else [axes]
 
-    print(f"  Peak time range: {peak_times.min():.1f} to {peak_times.max():.1f} ms")
-    print(f"  Median peak time: {np.median(peak_times):.1f} ms")
+    for i, electrode_idx in enumerate(electrode_indices):
+        ax = axes[i]
+        region = get_brain_region(electrode_idx, monkey_name)
 
-    # Create figure with two subplots: heatmap and peak time distribution
-    fig = plt.figure(figsize=(16, 10))
-    gs = fig.add_gridspec(2, 2, height_ratios=[3, 1], width_ratios=[20, 1],
-                          hspace=0.3, wspace=0.05)
+        # Get all trials for this electrode: (n_timepoints, n_trials)
+        electrode_data = allmua[:, :, electrode_idx]
 
-    # Main heatmap
-    ax_heatmap = fig.add_subplot(gs[0, 0])
+        # Compute trial average for overlay
+        trial_avg = electrode_data.mean(axis=1)
 
-    # Auto-scale colorbar if not provided
-    if vmin is None:
-        vmin = np.percentile(trial_avg_sorted, 1)
-    if vmax is None:
-        vmax = np.percentile(trial_avg_sorted, 99)
+        # Transpose for heatmap: trials (rows) × time (columns)
+        heatmap_data = electrode_data.T  # Now: (n_trials, n_timepoints)
 
-    im = ax_heatmap.imshow(trial_avg_sorted.T, aspect='auto', cmap='RdBu_r',
-                           extent=[tb[0], tb[-1], trial_avg_sorted.shape[1], 0],
-                           vmin=vmin, vmax=vmax, interpolation='nearest')
+        # Auto-scale colorbar based on data
+        vmin = np.percentile(heatmap_data, 1)
+        vmax = np.percentile(heatmap_data, 99)
 
-    ax_heatmap.axvline(0, color='yellow', linestyle='--', linewidth=2, alpha=0.8, label='Stimulus onset')
-    ax_heatmap.set_xlabel('Time (ms)', fontsize=12)
-    ax_heatmap.set_ylabel('Electrode (sorted by peak time)', fontsize=12)
-    ax_heatmap.set_title(f'{monkey_name} - Trial-Averaged Raw MUA Heatmap (Sorted by Peak Time)',
-                         fontsize=14, fontweight='bold')
-    ax_heatmap.legend(loc='upper right', fontsize=10)
+        # Plot heatmap
+        im = ax.imshow(heatmap_data, aspect='auto', cmap='hot',
+                      extent=[tb[0], tb[-1], heatmap_data.shape[0], 0],
+                      vmin=vmin, vmax=vmax, interpolation='nearest')
 
-    # Add colorbar
-    ax_cbar = fig.add_subplot(gs[0, 1])
-    cbar = plt.colorbar(im, cax=ax_cbar)
-    cbar.set_label('Trial-Averaged MUA', fontsize=11)
+        # Overlay the trial average as a line
+        # Need to normalize it to trial-space coordinates for visualization
+        trial_avg_normalized = (trial_avg - vmin) / (vmax - vmin) * heatmap_data.shape[0]
+        ax.plot(tb, trial_avg_normalized, color='cyan', linewidth=2.5,
+               label='Trial average', linestyle='-', alpha=0.9)
 
-    # Peak time distribution
-    ax_dist = fig.add_subplot(gs[1, 0])
-    ax_dist.hist(peak_times, bins=50, color='steelblue', alpha=0.7, edgecolor='black')
-    ax_dist.axvline(np.median(peak_times), color='red', linestyle='--', linewidth=2,
-                    label=f'Median: {np.median(peak_times):.1f}ms')
-    ax_dist.set_xlabel('Peak Time (ms)', fontsize=12)
-    ax_dist.set_ylabel('Number of Electrodes', fontsize=12)
-    ax_dist.set_title('Distribution of Peak Times', fontsize=12, fontweight='bold')
-    ax_dist.legend(fontsize=10)
-    ax_dist.grid(True, alpha=0.3)
+        ax.axvline(0, color='lime', linestyle='--', linewidth=2, alpha=0.7, label='Stimulus onset')
 
+        ax.set_xlabel('Time (ms)', fontsize=10)
+        ax.set_ylabel('Trial Number', fontsize=10)
+        ax.set_title(f'Electrode {electrode_idx} ({region})', fontsize=11, fontweight='bold')
+        ax.legend(loc='upper right', fontsize=8)
+
+        # Add colorbar
+        divider = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        divider.set_label('MUA', fontsize=9)
+
+        # Add statistics
+        stats_text = (f"Trials: {heatmap_data.shape[0]}\n"
+                     f"Mean: {trial_avg.mean():.2f}\n"
+                     f"Std: {trial_avg.std():.2f}")
+        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
+                fontsize=8, va='top', ha='left',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
+
+    # Hide empty subplots
+    for i in range(n_electrodes, len(axes)):
+        axes[i].axis('off')
+
+    fig.suptitle(f'{monkey_name} - Trial-by-Trial Response Heatmaps\n'
+                 f'(Each row = one trial, color = MUA amplitude)',
+                 fontsize=14, fontweight='bold', y=0.995)
+    plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
     print(f"Saved: {output_path}")
     plt.close()
@@ -348,12 +359,8 @@ def main():
     parser.add_argument('--data_dir', default='/scratch/groups/anishm/tvsd/')
     parser.add_argument('--output_dir', default='/oak/stanford/groups/anishm/gtyagi/stsbench/results/')
     parser.add_argument('--n_electrodes', type=int, default=12,
-                       help='Number of electrodes to plot in timeseries view')
+                       help='Number of electrodes to plot in timeseries and heatmap views')
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--vmin', type=float, default=None,
-                       help='Colorbar min for heatmap (default: auto)')
-    parser.add_argument('--vmax', type=float, default=None,
-                       help='Colorbar max for heatmap (default: auto)')
 
     args = parser.parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
@@ -386,11 +393,10 @@ def main():
         os.path.join(args.output_dir, f'{args.monkey}_trial_avg_timeseries.png')
     )
 
-    # 2. Heatmap sorted by peak time
-    plot_heatmap_sorted_by_peak(
-        tb, trial_avg, args.monkey,
-        os.path.join(args.output_dir, f'{args.monkey}_trial_avg_heatmap.png'),
-        vmin=args.vmin, vmax=args.vmax
+    # 2. Trial-by-trial heatmaps (shows variability across trials)
+    plot_trial_by_trial_heatmaps(
+        tb, allmua, electrode_indices, args.monkey,
+        os.path.join(args.output_dir, f'{args.monkey}_trial_by_trial_heatmaps.png')
     )
 
     # 3. Region comparison
@@ -401,8 +407,8 @@ def main():
 
     print("\n" + "="*60)
     print("COMPLETE - 3 plots created:")
-    print(f"  1. {args.monkey}_trial_avg_timeseries.png - Individual electrode timeseries")
-    print(f"  2. {args.monkey}_trial_avg_heatmap.png - Heatmap sorted by peak time")
+    print(f"  1. {args.monkey}_trial_avg_timeseries.png - Trial-averaged timeseries")
+    print(f"  2. {args.monkey}_trial_by_trial_heatmaps.png - Trial-by-trial variability")
     print(f"  3. {args.monkey}_trial_avg_by_region.png - Regional comparison")
     print("="*60)
 
