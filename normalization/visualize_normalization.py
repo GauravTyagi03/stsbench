@@ -2,7 +2,8 @@
 Visualize Normalization Results
 
 Compares raw MUA data with the final normalized output from alternative_timeseries_norm.py
-Creates 4 separate plots comparing trials from different days/regions.
+Creates 5 separate plots comparing trials from different days/regions.
+All plots now show EVERY single datapoint (no binning/sampling).
 
 Usage:
     python visualize_normalization.py --monkey monkeyF
@@ -146,8 +147,7 @@ def plot_single_raw_vs_norm(tb, time_bins, raw1, norm1, region1, day1, electrode
     fig, ax = plt.subplots(figsize=(12, 5))
 
     ax.plot(tb, raw1, label='Raw', linewidth=1.5, color='#2E86AB', alpha=0.7)
-    ax.plot(time_bins, norm1, label='Normalized', linewidth=2.5, color='#F18F01',
-            marker='o', markersize=4)
+    ax.plot(time_bins, norm1, label='Normalized', linewidth=2, color='#F18F01')
     ax.axvline(0, color='red', linestyle='--', alpha=0.4, linewidth=1.5, label='Stimulus onset')
     ax.set_xlabel('Time (ms)', fontsize=11)
     ax.set_ylabel('MUA', fontsize=11)
@@ -167,9 +167,9 @@ def plot_two_trials_norm(time_bins, norm1, norm2, region1, region2, day1, day2, 
     fig, ax = plt.subplots(figsize=(12, 5))
 
     ax.plot(time_bins, norm1, label=f'Trial 1 ({region1}, Day {day1})',
-            linewidth=2.5, color='#A23B72', marker='o', markersize=4)
+            linewidth=2, color='#A23B72')
     ax.plot(time_bins, norm2, label=f'Trial 2 ({region2}, Day {day2})',
-            linewidth=2.5, color='#17BEBB', marker='s', markersize=4)
+            linewidth=2, color='#17BEBB')
     ax.axvline(0, color='red', linestyle='--', alpha=0.4, linewidth=1.5, label='Stimulus onset')
     ax.axhline(0, color='gray', linestyle='--', alpha=0.3, linewidth=1)
     ax.set_xlabel('Time (ms)', fontsize=11)
@@ -189,20 +189,14 @@ def plot_all_four(tb, time_bins, raw1, raw2, norm1, norm2, region1, region2, mon
     """Plot 3: All four together (raw1, norm1, raw2, norm2)."""
     fig, ax = plt.subplots(figsize=(12, 5))
 
-    # Downsample raw data to match normalized time resolution
-    downsample = len(tb) // len(time_bins)
-    tb_downsampled = tb[::downsample][:len(time_bins)]
-    raw1_downsampled = raw1[::downsample][:len(time_bins)]
-    raw2_downsampled = raw2[::downsample][:len(time_bins)]
-
-    ax.plot(tb_downsampled, raw1_downsampled, label=f'Raw 1 ({region1})',
+    ax.plot(tb, raw1, label=f'Raw 1 ({region1})',
             linewidth=1.5, color='#2E86AB', alpha=0.5, linestyle='-')
-    ax.plot(tb_downsampled, raw2_downsampled, label=f'Raw 2 ({region2})',
+    ax.plot(tb, raw2, label=f'Raw 2 ({region2})',
             linewidth=1.5, color='#006D77', alpha=0.5, linestyle='-')
     ax.plot(time_bins, norm1, label=f'Norm 1 ({region1})',
-            linewidth=2.5, color='#A23B72', marker='o', markersize=4)
+            linewidth=2, color='#A23B72')
     ax.plot(time_bins, norm2, label=f'Norm 2 ({region2})',
-            linewidth=2.5, color='#17BEBB', marker='s', markersize=4)
+            linewidth=2, color='#17BEBB')
     ax.axvline(0, color='red', linestyle='--', alpha=0.4, linewidth=1.5)
     ax.set_xlabel('Time (ms)', fontsize=11)
     ax.set_ylabel('MUA', fontsize=11)
@@ -222,9 +216,9 @@ def plot_single_vs_average(time_bins, norm1, norm_avg_all, region1, day1, trial1
     fig, ax = plt.subplots(figsize=(12, 5))
 
     ax.plot(time_bins, norm1, label=f'Single Trial (Trial {trial1_idx}, Day {day1})',
-            linewidth=2.5, color='#A23B72', alpha=0.7, marker='o', markersize=4)
+            linewidth=2.5, color='#A23B72', alpha=0.7)
     ax.plot(time_bins, norm_avg_all, label=f'Average (all {n_trials} trials)',
-            linewidth=3, color='#F18F01', marker='D', markersize=5)
+            linewidth=3, color='#F18F01')
     ax.axvline(0, color='red', linestyle='--', alpha=0.4, linewidth=1.5, label='Stimulus onset')
     ax.axhline(0, color='gray', linestyle='--', alpha=0.3, linewidth=1)
     ax.set_xlabel('Time (ms)', fontsize=11)
@@ -249,8 +243,43 @@ def plot_single_vs_average(time_bins, norm1, norm_avg_all, region1, day1, trial1
     plt.close()
 
 
+def plot_multiple_electrodes_raw(tb, raw, electrode_indices, allmat, monkey_name, trial_idx, output_path):
+    """Plot 5: Raw data timeseries for 10 electrodes to show variety."""
+    fig, axes = plt.subplots(5, 2, figsize=(16, 20))
+    axes = axes.flatten()
+
+    colors = plt.cm.tab10(np.linspace(0, 1, 10))
+
+    for i, electrode_idx in enumerate(electrode_indices):
+        ax = axes[i]
+        region = get_brain_region(electrode_idx, monkey_name)
+        day = int(allmat[5, trial_idx])
+
+        raw_trace = raw[:, electrode_idx, trial_idx]
+
+        ax.plot(tb, raw_trace, linewidth=1.5, color=colors[i], alpha=0.8)
+        ax.axvline(0, color='red', linestyle='--', alpha=0.4, linewidth=1.5)
+        ax.set_xlabel('Time (ms)', fontsize=10)
+        ax.set_ylabel('Raw MUA', fontsize=10)
+        ax.set_title(f'Electrode {electrode_idx} ({region}, Day {day})', fontsize=11, fontweight='bold')
+        ax.grid(True, alpha=0.3)
+
+        # Add stats
+        stats_text = f"mean={raw_trace.mean():.2f}, std={raw_trace.std():.2f}"
+        ax.text(0.98, 0.95, stats_text, transform=ax.transAxes,
+                fontsize=8, va='top', ha='right',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
+
+    fig.suptitle(f'{monkey_name} - Raw Data for 10 Electrodes (Trial {trial_idx})',
+                 fontsize=14, fontweight='bold', y=0.995)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    print(f"Saved: {output_path}")
+    plt.close()
+
+
 def main():
-    parser = argparse.ArgumentParser(description='Visualize normalization with 4 separate plots')
+    parser = argparse.ArgumentParser(description='Visualize normalization with 5 separate plots (all datapoints, no sampling)')
     parser.add_argument('--monkey', required=True, choices=['monkeyF', 'monkeyN'])
     parser.add_argument('--data_dir', default='/scratch/groups/anishm/tvsd/')
     parser.add_argument('--results_dir', default='/oak/stanford/groups/anishm/gtyagi/stsbench/results/')
@@ -266,7 +295,7 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     print("="*60)
-    print("NORMALIZATION COMPARISON (4 PLOTS)")
+    print("NORMALIZATION COMPARISON (5 PLOTS)")
     print("="*60)
 
     # Load data once (efficient!)
@@ -295,42 +324,43 @@ def main():
     raw1 = raw[:, electrode1_idx, trial1_idx]
     raw2 = raw[:, electrode2_idx, trial2_idx]
 
-    # Bin the normalized timepoint data for visualization
-    # NOTE: normalized has shape (n_timepoints, n_electrodes, n_trials) - NOT binned!
-    # We average into bins here for cleaner visualization
-    n_timepoints_norm = normalized.shape[0]
-    n_bins = n_timepoints_norm // args.bin_width
-    truncated_length = n_bins * args.bin_width
+    # Use ALL timepoints (no binning) - show every single datapoint
+    print(f"\nUsing all normalized timepoints (no binning):")
+    print(f"  Normalized timepoints: {normalized.shape[0]}")
 
-    print(f"\nBinning normalized data for visualization:")
-    print(f"  Normalized timepoints: {n_timepoints_norm}")
-    print(f"  Bin width: {args.bin_width}")
-    print(f"  Number of bins: {n_bins}")
-
-    # Reshape and average into bins for plotting
-    norm_truncated = normalized[:truncated_length]  # (truncated_length, n_electrodes, n_trials)
-    norm_binned = norm_truncated.reshape(n_bins, args.bin_width, n_electrodes, n_trials).mean(axis=1)
-    # Shape: (n_bins, n_electrodes, n_trials)
-
-    norm1 = norm_binned[:, electrode1_idx, trial1_idx]
-    norm2 = norm_binned[:, electrode2_idx, trial2_idx]
+    norm1 = normalized[:, electrode1_idx, trial1_idx]
+    norm2 = normalized[:, electrode2_idx, trial2_idx]
 
     # Compute average across ALL trials for electrode1
-    norm_avg_all = norm_binned[:, electrode1_idx, :].mean(axis=1)
+    norm_avg_all = normalized[:, electrode1_idx, :].mean(axis=1)
 
-    # Time axes - use actual time base for binned visualization
-    # Average tb values within each bin to get bin centers
-    time_bins = np.array([tb_norm[i*args.bin_width:(i+1)*args.bin_width].mean()
-                          for i in range(n_bins)])
+    # Use the full time base (every single timepoint)
+    time_bins = tb_norm
 
     print(f"\nTime axis information:")
-    print(f"  Time bins range: {time_bins.min():.1f} to {time_bins.max():.1f} ms")
-    print(f"  Pre-stimulus bins (t < 0): {(time_bins < 0).sum()}/{len(time_bins)}")
-    print(f"  Post-stimulus bins (t >= 0): {(time_bins >= 0).sum()}/{len(time_bins)}")
+    print(f"  Time range: {time_bins.min():.1f} to {time_bins.max():.1f} ms")
+    print(f"  Pre-stimulus timepoints (t < 0): {(time_bins < 0).sum()}/{len(time_bins)}")
+    print(f"  Post-stimulus timepoints (t >= 0): {(time_bins >= 0).sum()}/{len(time_bins)}")
+
+    # Select 10 random electrodes from different regions for raw data visualization
+    if args.monkey == 'monkeyF':
+        regions = {'V1': range(0, 512), 'IT': range(512, 832), 'V4': range(832, 1024)}
+    else:
+        regions = {'V1': range(0, 512), 'V4': range(512, 768), 'IT': range(768, 1024)}
+
+    # Sample ~3-4 electrodes from each region to get 10 total
+    np.random.seed(args.seed + 1)
+    electrodes_for_raw_vis = []
+    n_per_region = [4, 3, 3]  # Total = 10
+    for (region_name, region_range), n_samples in zip(regions.items(), n_per_region):
+        selected = np.random.choice(list(region_range), size=n_samples, replace=False)
+        electrodes_for_raw_vis.extend(selected)
+
+    print(f"\nSelected 10 electrodes for raw data visualization: {electrodes_for_raw_vis}")
 
     print("\nGenerating plots...")
 
-    # Create all 4 plots
+    # Create all 5 plots
     plot_single_raw_vs_norm(tb, time_bins, raw1, norm1, region1, day1, electrode1_idx,
                             args.monkey, os.path.join(args.output_dir, f'{args.monkey}_plot1_single_raw_vs_norm.png'))
 
@@ -343,8 +373,11 @@ def main():
     plot_single_vs_average(time_bins, norm1, norm_avg_all, region1, day1, trial1_idx, electrode1_idx,
                            args.monkey, n_trials, os.path.join(args.output_dir, f'{args.monkey}_plot4_single_vs_average.png'))
 
+    plot_multiple_electrodes_raw(tb, raw, electrodes_for_raw_vis, allmat, args.monkey, trial1_idx,
+                                  os.path.join(args.output_dir, f'{args.monkey}_plot5_multiple_electrodes_raw.png'))
+
     print("\n" + "="*60)
-    print("COMPLETE - 4 plots created")
+    print("COMPLETE - 5 plots created")
     print("="*60)
 
 
