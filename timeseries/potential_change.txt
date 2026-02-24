@@ -1,0 +1,21 @@
+# TASK OVERVIEW
+I am modifying the conditioning mechanism of a Stable Diffusion-style conditional DDPM (U-Net) used for brain-to-image reconstruction. The base architecture uses a VQ-VAE autoencoder for the image latents and a U-Net conditioned on neural data via cross-attention.
+
+# CURRENT STATE
+- The current model takes time-averaged neural data as input.
+- Input tensor shape: `c \in \mathbb{R}^{B \times 1 \times N}` where `B` is batch size, `1` is the single temporal token (time-averaged), and `N` is the number of electrodes/neurons (~1000).
+- This tensor is fed directly into the U-Net's cross-attention layers, treating the entire averaged brain state as a single "word/token".
+
+# TARGET MODIFICATION
+I want to replace the time-averaged input with a binned time-series of neural data while keeping the core prediction task the same.
+- New input tensor shape: `c \in \mathbb{R}^{B \times T \times N}` where `T` is the number of time bins (e.g., 15-20).
+- The U-Net's cross-attention layers must now attend to a sequence of `T` tokens, allowing the spatial features to dynamically attend to different temporal bins.
+
+# REQUIRED IMPLEMENTATION STEPS
+Please write the PyTorch code for a `TemporalNeuralConditioner` module that prepares this time-series data for the standard Stable Diffusion U-Net cross-attention layers. The module must include:
+
+1. Temporal Positional Encoding: Because standard cross-attention is permutation invariant, implement a 1D Positional Encoding (sine/cosine) across the `T` dimension so the model understands the chronological order of the neural bins.
+2. Dimensionality Projection: Implement a projection layer (e.g., an MLP, 1D CNN, or lightweight Transformer layer) to map the electrode dimension `N` (~1000) to the expected `context_dim` of the U-Net's cross-attention heads (e.g., 768).
+3. Output Shape: The forward pass should accept `(B, T, N)` and output `(B, T, context_dim)`, ready to be passed directly as the `context` argument to the U-Net.
+
+Ensure the code is modular, type-hinted, and includes comments explaining the tensor shape transformations at each step.

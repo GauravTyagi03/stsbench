@@ -1,0 +1,223 @@
+IMPLEMENTATION PLAN: Temporal Binning for Neural Conditioning
+=============================================================
+
+Overview
+--------
+Replace the time-averaged neural conditioning (B x 1 x N) with a binned
+time-series (B x T x N), where T is a new hyperparameter (num_bins).
+The core U-Net and VQ-VAE weights do not change; all modifications are in
+the data pipeline, a new conditioning module, and the training/sampling scripts.
+
+Files to modify:
+  1. reconstruction/dataloader.py
+  2. reconstruction/train_ddpm_cond.py
+  3. reconstruction/sample_ddpm_cond.py
+  4. reconstruction/configs/dorsal_stream_diffusion.yaml
+  5. reconstruction/configs/ventral_stream_diffusion.yaml
+
+New file to create:
+  6. reconstruction/models/temporal_conditioner.py
+
+
+----------------------------------------------------------------------
+STEP 1: Update the Dataset / Dataloader
+File: reconstruction/dataloader.py
+----------------------------------------------------------------------
+
+1a. Add a new dataset class (or extend ImageDataset) that loads the
+    time-series normalized HDF5 file instead of the single time-averaged
+    neural vector.
+
+    New __getitem__ contract:
+      returns: (image_tensor, neural_tensor)
+      image_tensor shape: (3, 256, 256)  [unchanged]
+      neural_tensor shape: (T, N)        [was: (N,)]
+
+1b. Binning logic (bin the timeseries into T bins):
+    - Load the normalized HDF5 dataset (timeseries_normalized key).
+      Shape on disk: (n_timepoints, n_electrodes, n_trials)
+    - For trial i:
+        activity = data[:, inc_uids, i]        # (n_timepoints, N)
+        Divide n_timepoints into T equal-width bins.
+        For bin t: activity[t*w : (t+1)*w, :].mean(axis=0)  -> shape (N,)
+        Stack T bins -> shape (T, N)
+    - If num_bins does not divide evenly into n_timepoints, truncate to
+      (num_bins * bin_width) timepoints before binning.
+
+1c. Parameters to add to get_stimulus_datasets():
+    - use_timeseries: bool = False
+    - num_bins: int = 15
+    - timeseries_h5_path: str = None  (path to *_timeseries_normalized.h5)
+
+1d. When use_timeseries=False, behavior is identical to current code
+    (returns (N,) label, which train script will unsqueeze to (1, N)).
+
+1e. Update collate / DataLoader: no change needed; PyTorch collate_fn
+    handles (T, N) labels automatically, batching them to (B, T, N).
+
+
+----------------------------------------------------------------------
+STEP 2: Create TemporalNeuralConditioner
+File: reconstruction/models/temporal_conditioner.py
+----------------------------------------------------------------------
+
+This module prepares (B, T, N) data for the U-Net's cross-attention.
+
+class TemporalNeuralConditioner(nn.Module):
+
+  __init__(self, n_neurons, d_model, num_bins, dropout=0.0):
+    - input_proj:  nn.Linear(n_neurons, d_model)
+        Maps each time bin from N-dim neural space to d_model-dim embedding.
+    - pos_encoding: pre-computed sinusoidal table of shape (num_bins, d_model)
+        PE[pos, 2i]   = sin(pos / 10000^(2i/d_model))
+        PE[pos, 2i+1] = cos(pos / 10000^(2i/d_model))
+        Register as a buffer (not a parameter).
+    - dropout:    nn.Dropout(dropout)
+    - (optional) transformer_encoder: nn.TransformerEncoderLayer(
+          d_model=d_model, nhead=4, dim_feedforward=d_model*2,
+          batch_first=True)
+        Enables cross-bin interaction. Use only one layer.
+
+  forward(self, x):
+    # x: (B, T, N)
+    out = self.input_proj(x)             # (B, T, d_model)
+    out = out + self.pos_encoding        # broadcast PE over batch
+    out = self.dropout(out)
+    if use_transformer:
+        out = self.transformer_encoder(out)  # (B, T, d_model)
+    return out                           # (B, T, d_model)
+
+Notes:
+  - d_model becomes the new "neural_embed_dim" seen by the U-Net.
+  - Recommended d_model: 256 or 512 (smaller than N=2244, larger than
+    bottleneck_dim if bottleneck is disabled).
+  - The existing bottleneck_layer in Unet can be DISABLED when using
+    this module, since projection is already done here.
+
+
+----------------------------------------------------------------------
+STEP 3: Update Training Script
+File: reconstruction/train_ddpm_cond.py
+----------------------------------------------------------------------
+
+3a. Add config fields (read from YAML):
+    use_timeseries = dataset_config.get('use_timeseries', False)
+    num_bins       = dataset_config.get('num_bins', 15)
+
+3b. Update dataset loading call:
+    train_dataset, test_dataset = get_stimulus_datasets(
+        ...,
+        use_timeseries=use_timeseries,
+        num_bins=num_bins,
+        timeseries_h5_path=dataset_config['timeseries_h5_path']
+    )
+
+3c. Instantiate TemporalNeuralConditioner (if use_timeseries=True):
+    from models.temporal_conditioner import TemporalNeuralConditioner
+    temporal_cond = TemporalNeuralConditioner(
+        n_neurons=num_neurons,
+        d_model=model_config['temporal_d_model'],
+        num_bins=num_bins,
+    ).to(device)
+    Optimizer should include temporal_cond.parameters().
+
+3d. Update neural conditioning setup in training loop:
+    BEFORE (line 97):
+        neural_condition = cond_input.unsqueeze(1).to(device)  # (B,N) -> (B,1,N)
+
+    AFTER:
+        if use_timeseries:
+            neural_condition = cond_input.to(device)            # already (B, T, N)
+            neural_condition = temporal_cond(neural_condition)  # (B, T, d_model)
+        else:
+            neural_condition = cond_input.unsqueeze(1).to(device)  # (B, 1, N) unchanged
+
+3e. Update empty_neural_embed for CFG dropout:
+    BEFORE:
+        empty_neural_embed = torch.zeros(1, 1, neural_embed_dim)
+    AFTER (timeseries mode):
+        empty_neural_embed = torch.zeros(1, num_bins, temporal_d_model)
+
+    The dropout mask logic (neural_drop_mask) is otherwise unchanged.
+
+3f. Checkpoint saving: also save temporal_cond.state_dict() alongside
+    the U-Net checkpoint. Use a separate key in the checkpoint dict.
+
+
+----------------------------------------------------------------------
+STEP 4: Update Sampling Script
+File: reconstruction/sample_ddpm_cond.py
+----------------------------------------------------------------------
+
+4a. Load temporal_cond from checkpoint (same key used in saving).
+
+4b. Update neural prompt construction:
+    BEFORE (line 37-47):
+        neural_prompt = label.unsqueeze(0).unsqueeze(0)  # (1, 1, N)
+    AFTER (timeseries mode):
+        label shape is already (T, N) from updated dataset
+        neural_prompt = label.unsqueeze(0)               # (1, T, N)
+        neural_prompt = temporal_cond(neural_prompt)     # (1, T, d_model)
+
+4c. CFG null embedding:
+    uncond_prompt = torch.zeros(1, num_bins, temporal_d_model).to(device)
+
+
+----------------------------------------------------------------------
+STEP 5: Update Config Files
+Files: reconstruction/configs/dorsal_stream_diffusion.yaml
+       reconstruction/configs/ventral_stream_diffusion.yaml
+----------------------------------------------------------------------
+
+Add to dataset_params:
+    use_timeseries: true
+    num_bins: 15                          # hyperparameter to sweep
+    timeseries_h5_path: '/path/to/monkey_timeseries_normalized.h5'
+
+Add to ldm_params:
+    temporal_d_model: 256                 # output dim of TemporalNeuralConditioner
+    use_bottleneck: false                 # disable; projection done upstream
+
+Update neural_condition_config:
+    neural_embed_dim: 256                 # must equal temporal_d_model
+    cond_drop_prob: 0.1                   # unchanged
+
+
+----------------------------------------------------------------------
+STEP 6: Hyperparameter Sweep Plan
+----------------------------------------------------------------------
+
+Primary hyperparameter: num_bins
+    Candidates: 10, 15, 20, 30
+    Metric: FID or SSIM on held-out trials
+    Fix other params during sweep.
+
+Secondary: temporal_d_model
+    Candidates: 128, 256, 512
+    Only sweep after fixing num_bins.
+
+Ablations:
+    - use_timeseries=False (baseline)         T=1, time-averaged
+    - use_timeseries=True, no PE               check PE contribution
+    - use_timeseries=True, no transformer      check cross-bin interaction value
+    - use_timeseries=True, full pipeline       proposed method
+
+
+----------------------------------------------------------------------
+SUMMARY OF CHANGES
+----------------------------------------------------------------------
+
+  File                               | Type of change
+  -----------------------------------|----------------------------------
+  dataloader.py                      | Add timeseries loading + binning
+  models/temporal_conditioner.py     | New module (PE + projection)
+  train_ddpm_cond.py                 | Instantiate conditioner, update loop
+  sample_ddpm_cond.py                | Update prompt construction
+  configs/dorsal_stream_diffusion.yaml  | Add timeseries params
+  configs/ventral_stream_diffusion.yaml | Add timeseries params
+  models/unet_cond_base.py           | No change required
+  models/blocks.py                   | No change required
+  models/vqvae.py                    | No change required
+
+The U-Net and VQ-VAE are untouched. Existing time-averaged checkpoints
+remain usable (set use_timeseries=False to reproduce original behavior).
