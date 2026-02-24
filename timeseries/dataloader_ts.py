@@ -126,9 +126,10 @@ def get_timeseries_stimulus_datasets(
                 f"inc_uids max index {np.max(inc_uids)} exceeds HDF5 electrode dim "
                 f"{n_electrodes_in_file}. Check that the HDF5 was built from the same data."
             )
-        # (n_train, T, n_electrodes) -> select electrode subset -> (n_train, T, num_neurons)
-        train_activity = f['train_timeseries'][:, :, inc_uids]
-        test_activity  = f['test_timeseries'][:, :, inc_uids]
+        # Load full arrays first then numpy-index; h5py fancy indexing via point
+        # selection is extremely slow on network filesystems (one read per index).
+        train_activity = f['train_timeseries'][()][:, :, inc_uids]
+        test_activity  = f['test_timeseries'][()][:, :, inc_uids]
 
     print(f"Loaded train timeseries: {train_activity.shape}")
     print(f"Loaded test timeseries:  {test_activity.shape}")

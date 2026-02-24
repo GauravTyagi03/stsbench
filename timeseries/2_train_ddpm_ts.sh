@@ -23,6 +23,7 @@ module load hdf5/1.14.4
 
 unset PYTHONPATH
 export PYTHONNOUSERSITE=1
+export PYTHONUNBUFFERED=1
 
 source /oak/stanford/groups/anishm/gtyagi/stsbench/venv/bin/activate
 cd /oak/stanford/groups/anishm/gtyagi/stsbench/timeseries
