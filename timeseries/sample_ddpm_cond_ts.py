@@ -29,7 +29,7 @@ from utils import load_config, set_seed
 
 # ---- timeseries-specific modules ----
 from dataloader_ts import get_timeseries_stimulus_datasets
-from models.temporal_conditioner import TemporalNeuralConditioner
+from ts_models.temporal_conditioner import TemporalNeuralConditioner
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 

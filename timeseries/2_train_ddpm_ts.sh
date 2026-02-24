@@ -18,6 +18,8 @@
 module purge
 module load python/3.12.1
 module load cuda/12.4
+module load hdf5/1.14.4
+
 
 unset PYTHONPATH
 export PYTHONNOUSERSITE=1
@@ -36,6 +38,6 @@ export NUMEXPR_NUM_THREADS=${N}
 # PyTorch CUDA memory settings
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
-echo "Starting timeseries DDPM training (dorsal)..."
-python3 train_ddpm_cond_ts.py --config configs/dorsal_stream_diffusion_ts.yaml
+echo "Starting timeseries DDPM training (ventral)..."
+python3 train_ddpm_cond_ts.py --config configs/ventral_stream_diffusion_ts.yaml
 echo "Timeseries DDPM training completed!"

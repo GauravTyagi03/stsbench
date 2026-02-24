@@ -20,6 +20,10 @@ import torch
 from torch.optim import Adam
 from tqdm import tqdm
 
+# ---- timeseries-specific modules ----
+from dataloader_ts import get_timeseries_stimulus_datasets, get_dataloaders
+from ts_models.temporal_conditioner import TemporalNeuralConditioner
+
 # ---- shared modules live in reconstruction/ ----
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'reconstruction'))
 from models.unet_cond_base import Unet
@@ -27,9 +31,6 @@ from models.vqvae import VQVAE
 from scheduler.linear_noise_scheduler import LinearNoiseScheduler
 from utils import load_config, set_seed
 
-# ---- timeseries-specific modules ----
-from dataloader_ts import get_timeseries_stimulus_datasets, get_dataloaders
-from models.temporal_conditioner import TemporalNeuralConditioner
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(device)
