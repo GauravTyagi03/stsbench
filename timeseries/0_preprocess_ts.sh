@@ -41,7 +41,11 @@ mkdir -p logs/slurm
 # ---- ventral stream ----
 echo "Preprocessing ventral stream timeseries..."
 python preprocess_timeseries.py \
+<<<<<<< HEAD
     --timeseries_h5  /oak/stanford/groups/anishm/gtyagi/stsbench/results/normalization/monkeyF_timeseries_normalized.h5 \
+=======
+    --timeseries_h5  /oak/stanford/groups/anishm/gtyagi/stsbench/normalization/results/monkeyF_timeseries_normalized.h5 \
+>>>>>>> 51d821048fa03da1919d4e9111d16e06de474d40
     --raw_mat        /scratch/groups/anishm/tvsd/monkeyN_THINGS_MUA_trials.mat \
     --output_path    /oak/stanford/groups/anishm/gtyagi/stsbench/dataset/ventral_stream_timeseries_preprocessed.h5 \
     --num_bins       15
