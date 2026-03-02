@@ -67,9 +67,10 @@ def main():
 
     num_bins         = neural_cond_config['num_bins']
     num_neurons      = neural_cond_config['num_neurons']     # raw electrode count
-    temporal_d_model = neural_cond_config['temporal_d_model']
-    temporal_dropout = neural_cond_config.get('temporal_dropout', 0.0)
-    cond_drop_prob   = neural_cond_config['cond_drop_prob']
+    temporal_d_model        = neural_cond_config['temporal_d_model']
+    temporal_dropout        = neural_cond_config.get('temporal_dropout', 0.0)
+    temporal_encoder_type   = neural_cond_config.get('temporal_encoder_type', 'none')
+    cond_drop_prob          = neural_cond_config['cond_drop_prob']
 
     # neural_embed_dim seen by the U-Net must equal temporal_d_model (conditioner output)
     assert neural_cond_config['neural_embed_dim'] == temporal_d_model, (
@@ -84,6 +85,7 @@ def main():
         d_model=temporal_d_model,
         num_bins=num_bins,
         dropout=temporal_dropout,
+        temporal_encoder_type=temporal_encoder_type,
     ).to(device)
 
     # ---- dataset ----

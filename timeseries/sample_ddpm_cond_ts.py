@@ -135,10 +135,11 @@ def main():
 
     set_seed()
 
-    num_bins         = neural_cond_config['num_bins']
-    num_neurons      = neural_cond_config['num_neurons']
-    temporal_d_model = neural_cond_config['temporal_d_model']
-    temporal_dropout = neural_cond_config.get('temporal_dropout', 0.0)
+    num_bins              = neural_cond_config['num_bins']
+    num_neurons           = neural_cond_config['num_neurons']
+    temporal_d_model      = neural_cond_config['temporal_d_model']
+    temporal_dropout      = neural_cond_config.get('temporal_dropout', 0.0)
+    temporal_encoder_type = neural_cond_config.get('temporal_encoder_type', 'none')
 
     # ---- noise scheduler ----
     scheduler = LinearNoiseScheduler(
@@ -160,6 +161,7 @@ def main():
         d_model=temporal_d_model,
         num_bins=num_bins,
         dropout=temporal_dropout,
+        temporal_encoder_type=temporal_encoder_type,
     ).to(device)
     temporal_cond.eval()
 

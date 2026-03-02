@@ -1,0 +1,123 @@
+STANDARD vs TIMESERIES DDPM — ARCHITECTURE COMPARISON
+=======================================================
+
+INPUT DATA
+----------
+Standard:   (B, 315)        — one scalar per neuron, trial-averaged across all timepoints
+Timeseries: (B, 15, 315)    — 15 temporal bins x 315 neurons per trial
+
+The timeseries data carries the same electrodes but preserves when each neuron fired,
+not just how much it fired on average.
+
+
+CONDITIONING PIPELINE (before U-Net)
+--------------------------------------
+Standard:
+  (B, 315)
+    -> unsqueeze(1)
+  (B, 1, 315)               -- NO projection, raw electrode values passed directly
+
+Timeseries:
+  (B, 15, 315)
+    -> TemporalNeuralConditioner: Linear(315, 256) + sinusoidal PE over T axis
+  (B, 15, 256)              -- shared upstream projection + temporal position encoding
+
+Key difference: in the standard model, each U-Net block separately projects from
+raw electrode space (315-dim). In the timeseries model, all blocks receive a
+pre-projected 256-dim representation with temporal order encoded.
+
+
+CONTEXT SEEN BY CROSS-ATTENTION IN U-NET
+------------------------------------------
+Standard:   (B, 1,  315)   — one token, raw electrode values
+Timeseries: (B, 15, 256)   — fifteen tokens, projected + positionally encoded
+
+In both cases the U-Net cross-attention is:
+  Q: (B, H*W, C)  from spatial image features
+  K, V: (B, T, context_dim)  from the condition
+
+With T=1, each image patch attends to a single brain-state summary.
+With T=15, each image patch can selectively weight different temporal windows.
+
+
+GRADIENT FLOW THROUGH CONDITIONING
+-------------------------------------
+Standard:
+  neural_condition = cond_input.unsqueeze(1)  -- inside torch.no_grad()
+  No gradients flow through the condition processing.
+  Only the U-Net is updated.
+
+Timeseries:
+  neural_condition = temporal_cond(cond_input)  -- outside torch.no_grad()
+  Gradients flow through TemporalNeuralConditioner.
+  Optimizer covers U-Net + TemporalNeuralConditioner jointly.
+
+
+OPTIMIZER
+----------
+Standard:   Adam(model.parameters())                              -- U-Net only
+Timeseries: Adam(model.parameters() + temporal_cond.parameters()) -- U-Net + conditioner
+
+
+CFG DROPOUT (null conditioning)
+---------------------------------
+Standard:
+  Replaces condition with an explicit zero vector of shape (1, 315),
+  so the U-Net sees a literal zero token.
+
+Timeseries:
+  Zeros out the raw (B, T, N) input BEFORE the conditioner.
+  The conditioner still runs and produces (B, 15, 256) of pure positional encoding
+  (the linear projection outputs 0, but PE is added on top).
+  The null condition is therefore (B, 15, PE) not (B, 15, 0).
+
+
+PARAMETER COUNT DIFFERENCE
+----------------------------
+Standard adds no new parameters beyond the U-Net.
+Timeseries adds TemporalNeuralConditioner: Linear(315, 256) = 315*256 + 256 = 80,896 params.
+This is negligible relative to the U-Net (~100M params).
+
+
+=======================================================
+WHY THE LOSS CURVES ARE SO SIMILAR
+=======================================================
+
+1. SAME LOSS OBJECTIVE
+   Both minimize MSE(predicted_noise, actual_noise) in VQ-VAE latent space.
+   The objective does not directly measure conditioning quality.
+
+2. DIFFUSION LOSS IS DOMINATED BY HIGH NOISE TIMESTEPS
+   The training samples t uniformly from [0, 1000]. At high t (most samples),
+   the image is nearly pure noise and the conditioning signal has negligible
+   influence on the prediction. Conditioning only provides meaningful gradient
+   signal at low t, which is a small fraction of training steps.
+   Both models converge to the same unconditional denoising floor.
+
+3. THE TEMPORAL STRUCTURE MAY NOT ADD DISCRIMINATIVE INFORMATION (YET)
+   If the 15 bins are heavily correlated (i.e., the temporal profile is
+   consistent across neurons/trials), the model can approximate the
+   time-average by taking a linear combination of bins — effectively
+   collapsing T=15 back to T=1 in its attention weights. The loss would
+   then be the same as the standard model.
+
+4. CFG DROPOUT DILUTES CONDITIONING SIGNAL
+   10% of batches use null conditioning. The loss mixes conditioned and
+   unconditioned predictions, further flattening any difference between
+   models that differ only in conditioning quality.
+
+5. U-NET ARCHITECTURE IS IDENTICAL
+   The denoising backbone — the dominant term in the loss — is exactly
+   the same. Any difference in loss must come purely from the 80K-param
+   conditioner, which is a tiny fraction of total capacity.
+
+CONCLUSION
+----------
+Similar training loss is expected and is not evidence the timeseries model
+is wrong. Training loss measures noise prediction quality, not image
+reconstruction quality. The meaningful comparison is downstream: SSIM,
+pixel correlation, or FID on reconstructed images, where temporal
+conditioning should matter if per-bin SNR is sufficient.
+If those metrics are also identical, the likely culprit is low per-bin SNR
+(the temporal bins are too noisy to carry information beyond the average)
+or the model collapsing to attend uniformly over all T bins.
