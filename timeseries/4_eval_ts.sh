@@ -38,5 +38,5 @@ export VECLIB_MAXIMUM_THREADS=${N}
 export NUMEXPR_NUM_THREADS=${N}
 
 echo "Starting evaluation of timeseries reconstructions..."
-python3 eval.py --config /oak/stanford/groups/anishm/gtyagi/stsbench/timeseries/configs/dorsal_stream_diffusion_ts.yaml
+python3 eval.py --config /oak/stanford/groups/anishm/gtyagi/stsbench/timeseries/configs/ventral_stream_diffusion_ts.yaml
 echo "Evaluation completed!"

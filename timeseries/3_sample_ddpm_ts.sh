@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-#SBATCH --job-name=dorsal_sample_ts
+#SBATCH --job-name=sample_ts_ventral
 #SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/timeseries/logs/slurm/sample_ddpm_ts.%j.out
 #SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/timeseries/logs/slurm/sample_ddpm_ts.%j.err
 #SBATCH --time=4:00:00
@@ -17,6 +17,7 @@
 module purge
 module load python/3.12.1
 module load cuda/12.4
+module load hdf5/1.14.4
 
 unset PYTHONPATH
 export PYTHONNOUSERSITE=1
@@ -35,6 +36,6 @@ export NUMEXPR_NUM_THREADS=${N}
 # PyTorch CUDA memory settings
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
-echo "Starting timeseries DDPM sampling (dorsal)..."
-python3 sample_ddpm_cond_ts.py --config configs/dorsal_stream_diffusion_ts.yaml
+echo "Starting timeseries DDPM sampling (ventral)..."
+python3 sample_ddpm_cond_ts.py --config configs/ventral_stream_diffusion_ts.yaml
 echo "Sampling completed!"

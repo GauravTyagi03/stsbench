@@ -17,6 +17,7 @@
 module purge
 module load python/3.12.1
 module load cuda/12.4
+module load hdf5/1.14.4
 
 unset PYTHONPATH
 export PYTHONNOUSERSITE=1
