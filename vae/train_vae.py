@@ -17,6 +17,8 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 
+# ensure the vae/ directory itself is on the path (for models/, vae_dataset)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # reuse load_config and set_seed from reconstruction/utils.py
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'reconstruction'))
 from utils import load_config, set_seed

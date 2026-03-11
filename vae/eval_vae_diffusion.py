@@ -23,6 +23,8 @@ import torchvision
 from PIL import Image
 from tqdm import tqdm
 
+# ensure the vae/ directory itself is on the path (for models/, vae_dataset)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # shared reconstruction utilities
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'reconstruction'))
 from models.unet_cond_base import Unet
