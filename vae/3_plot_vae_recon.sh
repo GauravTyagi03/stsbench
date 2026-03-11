@@ -5,9 +5,7 @@
 #SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/ventral_stream/vae_z128_beta001/slurm_plot.%j.err
 #SBATCH --time=1:00:00
 #SBATCH --qos=normal
-#SBATCH -p owners
-#SBATCH -G 1
-#SBATCH -C GPU_SKU:A100_SXM4
+#SBATCH -p anishm
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=4
 #SBATCH -n 1
