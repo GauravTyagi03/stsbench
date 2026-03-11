@@ -65,28 +65,35 @@ def main():
     condition_types  = condition_config['condition_types']
     assert 'neural' in condition_types, "Timeseries training requires neural conditioning"
 
-    num_bins         = neural_cond_config['num_bins']
-    num_neurons      = neural_cond_config['num_neurons']     # raw electrode count
-    temporal_d_model        = neural_cond_config['temporal_d_model']
-    temporal_dropout        = neural_cond_config.get('temporal_dropout', 0.0)
-    temporal_encoder_type   = neural_cond_config.get('temporal_encoder_type', 'none')
-    cond_drop_prob          = neural_cond_config['cond_drop_prob']
+    num_bins              = neural_cond_config['num_bins']
+    num_neurons           = neural_cond_config['num_neurons']     # raw electrode count
+    temporal_encoder_type = neural_cond_config.get('temporal_encoder_type', 'none')
+    cond_drop_prob        = neural_cond_config['cond_drop_prob']
 
-    # neural_embed_dim seen by the U-Net must equal temporal_d_model (conditioner output)
-    assert neural_cond_config['neural_embed_dim'] == temporal_d_model, (
-        f"neural_embed_dim ({neural_cond_config['neural_embed_dim']}) must equal "
-        f"temporal_d_model ({temporal_d_model}) — the U-Net cross-attention "
-        f"context_dim is set from neural_embed_dim."
-    )
-
-    # ---- TemporalNeuralConditioner ----
-    temporal_cond = TemporalNeuralConditioner(
-        n_neurons=num_neurons,
-        d_model=temporal_d_model,
-        num_bins=num_bins,
-        dropout=temporal_dropout,
-        temporal_encoder_type=temporal_encoder_type,
-    ).to(device)
+    # ---- TemporalNeuralConditioner (skipped for 'mean_raw') ----
+    # 'mean_raw': time-average (B,T,N)->(B,N), unsqueeze to (B,1,N) — identical to the
+    # non-timeseries baseline; neural_embed_dim must equal num_neurons in this mode.
+    if temporal_encoder_type == 'mean_raw':
+        temporal_cond = None
+    else:
+        temporal_d_model = neural_cond_config['temporal_d_model']
+        temporal_dropout = neural_cond_config.get('temporal_dropout', 0.0)
+        assert neural_cond_config['neural_embed_dim'] == temporal_d_model, (
+            f"neural_embed_dim ({neural_cond_config['neural_embed_dim']}) must equal "
+            f"temporal_d_model ({temporal_d_model}) — the U-Net cross-attention "
+            f"context_dim is set from neural_embed_dim."
+        )
+        conv_kernel_size = neural_cond_config.get('conv_kernel_size', 3)
+        bin_start        = neural_cond_config.get('bin_start', 0)
+        temporal_cond = TemporalNeuralConditioner(
+            n_neurons=num_neurons,
+            d_model=temporal_d_model,
+            num_bins=num_bins,
+            dropout=temporal_dropout,
+            temporal_encoder_type=temporal_encoder_type,
+            conv_kernel_size=conv_kernel_size,
+            bin_start=bin_start,
+        ).to(device)
 
     # ---- dataset ----
     train_dataset, test_dataset = get_timeseries_stimulus_datasets(
@@ -131,18 +138,19 @@ def main():
     if os.path.exists(log_file):
         os.remove(log_file)
 
-    # ---- optimizer: U-Net + TemporalNeuralConditioner jointly ----
+    # ---- optimizer ----
     num_epochs = train_config['ldm_epochs']
-    optimizer  = Adam(
-        list(model.parameters()) + list(temporal_cond.parameters()),
-        lr=train_config['ldm_lr'],
-    )
+    params = list(model.parameters())
+    if temporal_cond is not None:
+        params += list(temporal_cond.parameters())
+    optimizer = Adam(params, lr=train_config['ldm_lr'])
     criterion = torch.nn.MSELoss()
 
     for epoch_idx in range(num_epochs):
         losses = []
         model.train()
-        temporal_cond.train()
+        if temporal_cond is not None:
+            temporal_cond.train()
 
         for im, cond_input in tqdm(train_loader):
             optimizer.zero_grad()
@@ -155,19 +163,18 @@ def main():
             # cond_input: (B, T, N) — already time-binned by the dataloader
             neural_condition = cond_input.to(device)
 
-            # Classifier-free guidance dropout: zero out entire samples in-place.
-            # The conditioner sees zero input -> outputs PE-only tokens (no neural signal),
-            # matching the null conditioning convention used during sampling.
             if cond_drop_prob > 0:
                 neural_drop_mask = (
                     torch.zeros(im.shape[0], device=device).float().uniform_(0, 1)
                     < cond_drop_prob
                 )
-                neural_condition[neural_drop_mask] = 0.0  # (B, T, N) zero rows
+                neural_condition[neural_drop_mask] = 0.0  # zero out dropped samples
 
-            # Project N -> d_model and add positional encoding (needs gradients)
-            neural_condition = temporal_cond(neural_condition)   # (B, T, d_model)
-            cond_input = neural_condition
+            if temporal_cond is None:
+                # 'mean_raw': average over T, unsqueeze → (B, 1, N); no learned projection
+                cond_input = neural_condition.mean(dim=1).unsqueeze(1)
+            else:
+                cond_input = temporal_cond(neural_condition)   # (B, T, d_model)
             ######################################################
 
             noise     = torch.randn_like(im).to(device)
@@ -187,11 +194,11 @@ def main():
             ))
 
         if epoch_idx % 5 == 0 or epoch_idx == num_epochs - 1:
+            ckpt = {'model': model.state_dict()}
+            if temporal_cond is not None:
+                ckpt['temporal_cond'] = temporal_cond.state_dict()
             torch.save(
-                {
-                    'model':        model.state_dict(),
-                    'temporal_cond': temporal_cond.state_dict(),
-                },
+                ckpt,
                 os.path.join(train_config['ckpt_dir'], train_config['ldm_ckpt_name']),
             )
 

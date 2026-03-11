@@ -59,18 +59,17 @@ def sample(
         ##################################################
 
         ########### Build conditional and null context ###########
-        # label shape: (T, N) — from TimeseriesImageDataset
-        # Add batch dim: (T, N) -> (1, T, N)
+        # label shape: (T, N) — from TimeseriesImageDataset; add batch dim → (1, T, N)
         neural_prompt_raw = label.unsqueeze(0).to(device)
-        cond_input = temporal_cond(neural_prompt_raw)           # (1, T, d_model)
 
-        # Null conditioning: conditioner output for all-zero neural input.
-        # During training, dropped samples had their (B, T, N) input zeroed before
-        # the conditioner, so this is the exact null token the model learned against.
-        null_raw   = torch.zeros(1, num_bins, num_neurons, device=device)
-        uncond_input = temporal_cond(null_raw)                  # (1, T, d_model)
-
-        assert cond_input.shape == uncond_input.shape
+        if temporal_cond is None:
+            # 'mean_raw': average over T → (1, N) → (1, 1, N); no projection
+            cond_input   = neural_prompt_raw.mean(dim=1, keepdim=True)           # (1, 1, N)
+            uncond_input = torch.zeros(1, 1, num_neurons, device=device)         # (1, 1, N)
+        else:
+            cond_input   = temporal_cond(neural_prompt_raw)                      # (1, T, d_model)
+            null_raw     = torch.zeros(1, num_bins, num_neurons, device=device)
+            uncond_input = temporal_cond(null_raw)                               # (1, T, d_model)
         ##########################################################
 
         cf_guidance_scale = train_config.get('cf_guidance_scale', 1.0)
@@ -137,8 +136,6 @@ def main():
 
     num_bins              = neural_cond_config['num_bins']
     num_neurons           = neural_cond_config['num_neurons']
-    temporal_d_model      = neural_cond_config['temporal_d_model']
-    temporal_dropout      = neural_cond_config.get('temporal_dropout', 0.0)
     temporal_encoder_type = neural_cond_config.get('temporal_encoder_type', 'none')
 
     # ---- noise scheduler ----
@@ -155,23 +152,33 @@ def main():
     ).to(device)
     model.eval()
 
-    # ---- TemporalNeuralConditioner ----
-    temporal_cond = TemporalNeuralConditioner(
-        n_neurons=num_neurons,
-        d_model=temporal_d_model,
-        num_bins=num_bins,
-        dropout=temporal_dropout,
-        temporal_encoder_type=temporal_encoder_type,
-    ).to(device)
-    temporal_cond.eval()
+    # ---- TemporalNeuralConditioner (skipped for 'mean_raw') ----
+    if temporal_encoder_type == 'mean_raw':
+        temporal_cond = None
+    else:
+        temporal_d_model = neural_cond_config['temporal_d_model']
+        temporal_dropout = neural_cond_config.get('temporal_dropout', 0.0)
+        conv_kernel_size = neural_cond_config.get('conv_kernel_size', 3)
+        bin_start        = neural_cond_config.get('bin_start', 0)
+        temporal_cond = TemporalNeuralConditioner(
+            n_neurons=num_neurons,
+            d_model=temporal_d_model,
+            num_bins=num_bins,
+            dropout=temporal_dropout,
+            temporal_encoder_type=temporal_encoder_type,
+            conv_kernel_size=conv_kernel_size,
+            bin_start=bin_start,
+        ).to(device)
+        temporal_cond.eval()
 
-    # ---- load checkpoint (combined dict with 'model' and 'temporal_cond' keys) ----
+    # ---- load checkpoint ----
     ldm_ckpt_path = os.path.join(train_config['ckpt_dir'], train_config['ldm_ckpt_name'])
     if not os.path.exists(ldm_ckpt_path):
         raise FileNotFoundError(f'Checkpoint not found: {ldm_ckpt_path}')
     ckpt = torch.load(ldm_ckpt_path, map_location=device)
     model.load_state_dict(ckpt['model'])
-    temporal_cond.load_state_dict(ckpt['temporal_cond'])
+    if temporal_cond is not None:
+        temporal_cond.load_state_dict(ckpt['temporal_cond'])
 
     os.makedirs(train_config['output_dir'], exist_ok=True)
 

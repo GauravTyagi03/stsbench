@@ -14,7 +14,7 @@ Shape flow:
 
 temporal_encoder_type:
   'none'   — no additional encoder (original behaviour)
-  'conv1d' — Conv1d(kernel=3, padding=1) + GELU, residual
+  'conv1d' — Conv1d(kernel=conv_kernel_size, padding=k//2) + GELU, residual
   'gru'    — GRU(num_layers=1), residual
 """
 
@@ -31,6 +31,8 @@ class TemporalNeuralConditioner(nn.Module):
         num_bins: int,
         dropout: float = 0.0,
         temporal_encoder_type: str = 'none',
+        conv_kernel_size: int = 3,
+        bin_start: int = 0,
     ):
         """
         Args:
@@ -40,6 +42,8 @@ class TemporalNeuralConditioner(nn.Module):
             num_bins:              Number of temporal bins (T).
             dropout:               Dropout probability applied after PE addition.
             temporal_encoder_type: One of 'none', 'conv1d', 'gru'.
+            conv_kernel_size:      Kernel size for Conv1d encoder (padding = k//2).
+            bin_start:             Drop first N bins (pre-stimulus baseline).
         """
         super().__init__()
         assert d_model % 2 == 0, "d_model must be even for sinusoidal positional encoding"
@@ -50,6 +54,7 @@ class TemporalNeuralConditioner(nn.Module):
         self.d_model = d_model
         self.num_bins = num_bins
         self.temporal_encoder_type = temporal_encoder_type
+        self.bin_start = bin_start
 
         # Project each time bin from electrode space -> embedding space.
         # nn.Linear applies to the last dimension, so it acts identically
@@ -70,7 +75,7 @@ class TemporalNeuralConditioner(nn.Module):
         # Optional temporal encoder
         if temporal_encoder_type == 'conv1d':
             self.temporal_encoder = nn.Sequential(
-                nn.Conv1d(d_model, d_model, kernel_size=3, padding=1),
+                nn.Conv1d(d_model, d_model, kernel_size=conv_kernel_size, padding=conv_kernel_size // 2),
                 nn.GELU(),
             )
         elif temporal_encoder_type == 'gru':
@@ -90,10 +95,14 @@ class TemporalNeuralConditioner(nn.Module):
         Returns:
             out: (B, T, d_model) — context tokens for U-Net cross-attention.
         """
+        # Drop pre-stimulus bins if configured
+        if self.bin_start > 0:
+            x = x[:, self.bin_start:, :]   # (B, T-bin_start, N)
+
         # (B, T, N) -> (B, T, d_model)
         out = self.input_proj(x)
-        # Add positional encoding; self.pe is (1, T, d_model) — broadcasts over B
-        out_pe = out + self.pe
+        # Add positional encoding; self.pe is (1, T, d_model) — slice for bin_start
+        out_pe = out + self.pe[:, self.bin_start:, :]
 
         if self.temporal_encoder_type == 'conv1d':
             # Conv1d expects (B, C, L); transpose T and d dims

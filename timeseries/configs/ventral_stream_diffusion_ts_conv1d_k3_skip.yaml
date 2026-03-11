@@ -1,5 +1,5 @@
 name: 'ventral_stream'
-model_name: 'diffusion_ts_conv1d'   # used by eval.py to construct image_dir
+model_name: 'diffusion_ts_conv1d_k3_skip'   # used by eval.py to construct image_dir
 
 dataset_params:
   im_channels: 3
@@ -37,7 +37,7 @@ ldm_params:
       temporal_dropout: 0.0
       temporal_encoder_type: 'conv1d'
       conv_kernel_size: 3
-      bin_start: 0
+      bin_start: 5               # first 5 bins are pre-stimulus (t=-100ms to -1ms); bin 5 starts at t=0ms
       cond_drop_prob: 0.1
 
 autoencoder_params:
@@ -55,8 +55,8 @@ autoencoder_params:
 
 train_params:
   seed: 1111
-  output_dir: '/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/ventral_stream/diffusion_ts_conv1d/'
-  ckpt_dir: '/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/checkpoints/ventral_stream/diffusion_ts_conv1d/'
+  output_dir: '/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/ventral_stream/diffusion_ts_conv1d_k3_skip/'
+  ckpt_dir: '/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/checkpoints/ventral_stream/diffusion_ts_conv1d_k3_skip/'
   # VQ-VAE checkpoint lives in the base reconstruction directory — reuse without retraining
   vqvae_ckpt_dir: '/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/checkpoints/ventral_stream/diffusion/'
   ldm_batch_size: 8
@@ -79,10 +79,10 @@ train_params:
   cf_guidance_scale: 1.0
   vae_latent_dir_name: 'vae_latents'
   vqvae_latent_dir_name: 'vqvae_latents'
-  ldm_ckpt_name: 'ddpm_ckpt_neural_cond_ts_conv1d.pth'
+  ldm_ckpt_name: 'ddpm_ckpt_neural_cond_ts_conv1d_k3_skip.pth'
   vqvae_autoencoder_ckpt_name: 'vqvae_autoencoder_ckpt.pth'
   vae_autoencoder_ckpt_name: 'vae_autoencoder_ckpt.pth'
   vqvae_discriminator_ckpt_name: 'vqvae_discriminator_ckpt.pth'
   vae_discriminator_ckpt_name: 'vae_discriminator_ckpt.pth'
   vqvae_autoencoder_log_name: 'vqvae_training_log.txt'
-  ldm_log_name: 'ldm_training_log_ts_conv1d.txt'
+  ldm_log_name: 'ldm_training_log_ts_conv1d_k3_skip.txt'
