@@ -1,0 +1,26 @@
+name: 'ventral_stream_vae'
+model_name: 'vae_z64_beta01'
+
+dataset_params:
+  timeseries_h5_path: '/oak/stanford/groups/anishm/gtyagi/stsbench/dataset/ventral_stream_timeseries_preprocessed.h5'
+  num_neurons: 315
+  num_bins: 15
+  T_win: 10
+  win_stride: 3
+
+vae_params:
+  z_channels: 64
+  enc_channels: [128, 64]
+  kernel_size: 3
+  num_groups: 8
+
+train_params:
+  beta: 0.01
+  batch_size: 128
+  epochs: 100
+  lr: 0.0001
+  ckpt_dir: '/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/checkpoints/ventral_stream/vae_z64_beta01/'
+  output_dir: '/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/ventral_stream/vae_z64_beta01/'
+  ckpt_name: 'vae_ckpt.pth'
+  log_name: 'vae_training_log.txt'
+  seed: 1111
