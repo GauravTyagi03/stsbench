@@ -23,22 +23,23 @@ import torchvision
 from PIL import Image
 from tqdm import tqdm
 
-# ensure the vae/ directory itself is on the path (for models/, vae_dataset)
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-# shared reconstruction utilities
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'reconstruction'))
+_here = os.path.dirname(os.path.abspath(__file__))
+
+# reconstruction/ must be at index 0 so its `models` package is found for Unet/VQVAE
+sys.path.insert(0, os.path.join(_here, '..', 'timeseries'))
+sys.path.insert(0, os.path.join(_here, '..', 'reconstruction'))
 from models.unet_cond_base import Unet
 from models.vqvae import VQVAE
 from scheduler.linear_noise_scheduler import LinearNoiseScheduler
 from utils import load_config, set_seed
 
-# timeseries modules (for TemporalNeuralConditioner + test dataset)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'timeseries'))
 from dataloader_ts import get_timeseries_stimulus_datasets
 from ts_models.temporal_conditioner import TemporalNeuralConditioner
 
-# VAE
-from models.neural_vae import NeuralVAE
+# NeuralVAE lives in vae/models/ — add that directory directly to avoid
+# shadowing reconstruction/models/ with a second 'models' package
+sys.path.insert(0, os.path.join(_here, 'models'))
+from neural_vae import NeuralVAE
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'Device: {device}')
