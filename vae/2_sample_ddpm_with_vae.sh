@@ -22,6 +22,11 @@ module purge
 module load python/3.12.1
 module load cuda/12.4
 module load hdf5/1.14.4
+module load py-pytorch/2.4.1_py312
+module load py-torchvision/0.19.1_py312
+module load py-pillow/10.2.0_py312
+module load py-numpy/1.26.3_py312
+module load yaml-cpp/0.7.0
 
 unset PYTHONPATH
 export PYTHONNOUSERSITE=1
