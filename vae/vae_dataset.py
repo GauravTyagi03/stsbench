@@ -32,14 +32,18 @@ class SlidingWindowNeuralDataset(Dataset):
     """
 
     def __init__(self, h5_path, split='train', T_win=10, win_stride=3,
-                 use_sliding=True):
+                 use_sliding=True, num_neurons=315):
         super().__init__()
         self.T_win  = T_win
         self.use_sliding = use_sliding
 
         key = 'train_timeseries' if split == 'train' else 'test_timeseries'
         with h5py.File(h5_path, 'r') as f:
-            data = f[key][:]  # (n_trials, T=15, N=315)
+            data = f[key][()]  # (n_trials, T=15, N_total)
+
+        # Select the first num_neurons electrodes — mirrors the ventral-stream
+        # electrode selection in dataloader_ts.py (inc_uids = np.arange(315)).
+        data = data[:, :, :num_neurons]  # (n_trials, T, num_neurons)
 
         # Replace NaNs with zero (mirrors TimeseriesImageDataset)
         data = np.where(np.isnan(data), 0.0, data)

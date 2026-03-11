@@ -50,6 +50,7 @@ def main():
         T_win        = dataset_cfg['T_win'],
         win_stride   = dataset_cfg['win_stride'],
         use_sliding  = True,
+        num_neurons  = dataset_cfg['num_neurons'],
     )
     val_dataset = SlidingWindowNeuralDataset(
         h5_path      = dataset_cfg['timeseries_h5_path'],
@@ -57,6 +58,7 @@ def main():
         T_win        = dataset_cfg['T_win'],
         win_stride   = dataset_cfg['win_stride'],
         use_sliding  = False,
+        num_neurons  = dataset_cfg['num_neurons'],
     )
 
     train_loader = DataLoader(
