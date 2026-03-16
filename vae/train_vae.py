@@ -78,16 +78,18 @@ def main():
 
     # ---- model ----
     vae = NeuralVAE(
-        num_neurons  = dataset_cfg['num_neurons'],
-        enc_channels = vae_cfg['enc_channels'],
-        z_channels   = vae_cfg['z_channels'],
-        kernel_size  = vae_cfg.get('kernel_size', 3),
-        num_groups   = vae_cfg.get('num_groups', 8),
+        num_neurons    = dataset_cfg['num_neurons'],
+        enc_channels   = vae_cfg['enc_channels'],
+        z_channels     = vae_cfg['z_channels'],
+        kernel_size    = vae_cfg.get('kernel_size', 3),
+        num_groups     = vae_cfg.get('num_groups', 8),
+        num_res_blocks = vae_cfg.get('num_res_blocks', 1),
     ).to(device)
 
-    optimizer = Adam(vae.parameters(), lr=train_cfg['lr'])
-    beta      = train_cfg['beta']
-    epochs    = train_cfg['epochs']
+    optimizer      = Adam(vae.parameters(), lr=train_cfg['lr'])
+    beta           = train_cfg['beta']
+    temporal_alpha = train_cfg.get('temporal_alpha', 0.0)
+    epochs         = train_cfg['epochs']
 
     # ---- logging ----
     os.makedirs(train_cfg['output_dir'], exist_ok=True)
@@ -101,7 +103,7 @@ def main():
     for epoch in range(1, epochs + 1):
         # ---- train ----
         vae.train()
-        train_losses, train_recon, train_kl = [], [], []
+        train_losses, train_recon, train_temporal, train_kl = [], [], [], []
 
         for x in tqdm(train_loader, desc=f'Epoch {epoch}/{epochs} [train]'):
             x = x.to(device)                   # (B, N, T_win)
@@ -109,34 +111,38 @@ def main():
 
             optimizer.zero_grad()
             recon, mu, logvar = vae(x)
-            total, recon_l, kl_l = vae_loss(recon, target, mu, logvar, beta)
+            total, recon_l, temporal_l, kl_l = vae_loss(recon, target, mu, logvar, beta, temporal_alpha)
             total.backward()
             optimizer.step()
 
             train_losses.append(total.item())
             train_recon.append(recon_l.item())
+            train_temporal.append(temporal_l.item())
             train_kl.append(kl_l.item())
 
         # ---- val ----
         vae.eval()
-        val_losses, val_recon, val_kl = [], [], []
+        val_losses, val_recon, val_temporal, val_kl = [], [], [], []
         with torch.no_grad():
             for x in val_loader:
                 x = x.to(device)
                 target = x.transpose(1, 2)
                 recon, mu, logvar = vae(x)
-                total, recon_l, kl_l = vae_loss(recon, target, mu, logvar, beta)
+                total, recon_l, temporal_l, kl_l = vae_loss(recon, target, mu, logvar, beta, temporal_alpha)
                 val_losses.append(total.item())
                 val_recon.append(recon_l.item())
+                val_temporal.append(temporal_l.item())
                 val_kl.append(kl_l.item())
 
         log_line = (
             f'Epoch {epoch:03d} | '
             f'train_total={np.mean(train_losses):.6f}  '
             f'train_recon={np.mean(train_recon):.6f}  '
+            f'train_temporal={np.mean(train_temporal):.6f}  '
             f'train_kl={np.mean(train_kl):.6f}  || '
             f'val_total={np.mean(val_losses):.6f}  '
             f'val_recon={np.mean(val_recon):.6f}  '
+            f'val_temporal={np.mean(val_temporal):.6f}  '
             f'val_kl={np.mean(val_kl):.6f}'
         )
         print(log_line)

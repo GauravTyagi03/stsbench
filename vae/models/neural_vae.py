@@ -41,22 +41,22 @@ class Encoder(nn.Module):
     """
     (B, N=315, T_win)
     → Conv1d(315, enc_ch[0])
-    → ResBlock(enc_ch[0], enc_ch[0])
+    → num_res_blocks × ResBlock(enc_ch[0], enc_ch[0])
     → Conv1d(enc_ch[0], enc_ch[1], stride=2)   # downsample T
-    → ResBlock(enc_ch[1], enc_ch[1])
+    → num_res_blocks × ResBlock(enc_ch[1], enc_ch[1])
     → GroupNorm + SiLU
     → mu_conv, logvar_conv: (B, z_channels, T_win//2)
     """
     def __init__(self, num_neurons=315, enc_channels=(128, 64),
-                 z_channels=64, kernel_size=3, num_groups=8):
+                 z_channels=64, kernel_size=3, num_groups=8, num_res_blocks=1):
         super().__init__()
         c0, c1 = enc_channels
         padding = kernel_size // 2
 
-        self.proj    = nn.Conv1d(num_neurons, c0, kernel_size, padding=padding)
-        self.res0    = Conv1dResBlock(c0, c0, kernel_size, num_groups)
-        self.down    = nn.Conv1d(c0, c1, kernel_size, padding=padding, stride=2)
-        self.res1    = Conv1dResBlock(c1, c1, kernel_size, num_groups)
+        self.proj = nn.Conv1d(num_neurons, c0, kernel_size, padding=padding)
+        self.res0 = nn.Sequential(*[Conv1dResBlock(c0, c0, kernel_size, num_groups) for _ in range(num_res_blocks)])
+        self.down = nn.Conv1d(c0, c1, kernel_size, padding=padding, stride=2)
+        self.res1 = nn.Sequential(*[Conv1dResBlock(c1, c1, kernel_size, num_groups) for _ in range(num_res_blocks)])
         self.norm    = nn.GroupNorm(min(num_groups, c1), c1)
         self.act     = nn.SiLU()
         self.mu_conv     = nn.Conv1d(c1, z_channels, 1)
@@ -76,21 +76,21 @@ class Decoder(nn.Module):
     """
     z: (B, z_ch, T_win//2)
     → Conv1d(z_ch, enc_ch[1])
-    → ResBlock(enc_ch[1], enc_ch[1])
+    → num_res_blocks × ResBlock(enc_ch[1], enc_ch[1])
     → ConvTranspose1d(enc_ch[1], enc_ch[0], k=2, stride=2)   # upsample T
-    → ResBlock(enc_ch[0], enc_ch[0])
+    → num_res_blocks × ResBlock(enc_ch[0], enc_ch[0])
     → GroupNorm + SiLU → Conv1d(enc_ch[0], 315)
     Output: (B, N=315, T_win)
     """
     def __init__(self, num_neurons=315, enc_channels=(128, 64),
-                 z_channels=64, kernel_size=3, num_groups=8):
+                 z_channels=64, kernel_size=3, num_groups=8, num_res_blocks=1):
         super().__init__()
         c0, c1 = enc_channels
 
         self.post_z  = nn.Conv1d(z_channels, c1, 1)
-        self.res0    = Conv1dResBlock(c1, c1, kernel_size, num_groups)
+        self.res0    = nn.Sequential(*[Conv1dResBlock(c1, c1, kernel_size, num_groups) for _ in range(num_res_blocks)])
         self.up      = nn.ConvTranspose1d(c1, c0, kernel_size=2, stride=2)
-        self.res1    = Conv1dResBlock(c0, c0, kernel_size, num_groups)
+        self.res1    = nn.Sequential(*[Conv1dResBlock(c0, c0, kernel_size, num_groups) for _ in range(num_res_blocks)])
         self.norm    = nn.GroupNorm(min(num_groups, c0), c0)
         self.act     = nn.SiLU()
         self.out_conv = nn.Conv1d(c0, num_neurons, kernel_size, padding=kernel_size // 2)
@@ -117,10 +117,10 @@ class NeuralVAE(nn.Module):
       recon: (B, T_win, N) — transposed for loss computation
     """
     def __init__(self, num_neurons=315, enc_channels=(128, 64),
-                 z_channels=64, kernel_size=3, num_groups=8):
+                 z_channels=64, kernel_size=3, num_groups=8, num_res_blocks=1):
         super().__init__()
-        self.encoder = Encoder(num_neurons, enc_channels, z_channels, kernel_size, num_groups)
-        self.decoder = Decoder(num_neurons, enc_channels, z_channels, kernel_size, num_groups)
+        self.encoder = Encoder(num_neurons, enc_channels, z_channels, kernel_size, num_groups, num_res_blocks)
+        self.decoder = Decoder(num_neurons, enc_channels, z_channels, kernel_size, num_groups, num_res_blocks)
 
     def reparameterize(self, mu, logvar):
         if self.training:
@@ -159,13 +159,20 @@ class NeuralVAE(nn.Module):
         return recon, mu, logvar
 
 
-def vae_loss(recon, target, mu, logvar, beta=0.001):
+def vae_loss(recon, target, mu, logvar, beta=0.001, temporal_alpha=0.0):
     """
     recon:  (B, T_win, N)
     target: (B, T_win, N)
-    Returns total_loss, recon_loss, kl_loss (all scalars).
+    Returns total_loss, recon_loss, temporal_loss, kl_loss (all scalars).
     """
-    recon_loss = torch.nn.functional.mse_loss(recon, target)
+    import torch.nn.functional as F
+    recon_loss = F.mse_loss(recon, target)
+    if temporal_alpha > 0:
+        recon_diff  = torch.diff(recon,  dim=1)   # (B, T-1, N)
+        target_diff = torch.diff(target, dim=1)   # (B, T-1, N)
+        temporal_loss = F.mse_loss(recon_diff, target_diff)
+    else:
+        temporal_loss = torch.zeros(1, device=recon.device)
     kl_loss    = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-    total_loss = recon_loss + beta * kl_loss
-    return total_loss, recon_loss, kl_loss
+    total_loss = recon_loss + temporal_alpha * temporal_loss + beta * kl_loss
+    return total_loss, recon_loss, temporal_loss, kl_loss
