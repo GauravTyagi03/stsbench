@@ -23,6 +23,7 @@ Usage:
 
 import argparse
 import os
+import re
 import sys
 
 import matplotlib.pyplot as plt
@@ -158,7 +159,12 @@ def run_one(config_path, use_best, sample_idx, neuron_idx, n_samples, n_neurons)
 
     ckpt_name = 'vae_ckpt_best.pth' if use_best else train_cfg['ckpt_name']
     ckpt_path = os.path.join(train_cfg['ckpt_dir'], ckpt_name)
-    vae.load_state_dict(torch.load(ckpt_path, map_location=device)['vae'])
+    raw_sd = torch.load(ckpt_path, map_location=device)['vae']
+    # Remap keys saved before res blocks were wrapped in nn.Sequential:
+    # old: encoder.res0.block.X  →  new: encoder.res0.0.block.X
+    sd = {re.sub(r'\.(res\d+)\.(block|residual)\.', r'.\1.0.\2.', k): v
+          for k, v in raw_sd.items()}
+    vae.load_state_dict(sd)
     vae.eval()
 
     N      = dataset_cfg['num_neurons']
