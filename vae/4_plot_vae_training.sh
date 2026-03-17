@@ -1,8 +1,8 @@
 #!/bin/bash
 #
 #SBATCH --job-name=plot_vae_training
-#SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/ventral_stream/slurm_plot_training.%j.out
-#SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/ventral_stream/slurm_plot_training.%j.err
+#SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/vae/logs/slurm_plot_training.%j.out
+#SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/vae/logs/slurm_plot_training.%j.err
 #SBATCH --time=0:30:00
 #SBATCH --qos=normal
 #SBATCH -p anishm
@@ -16,7 +16,6 @@
 module purge
 module load python/3.12.1
 module load py-numpy/1.26.3_py312
-module load py-matplotlib/3.8.2_py312
 
 unset PYTHONPATH
 export PYTHONNOUSERSITE=1
