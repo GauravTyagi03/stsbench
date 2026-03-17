@@ -134,6 +134,80 @@ def plot_training(log_path):
 
 
 # ---------------------------------------------------------------------------
+# Combined plot (all runs in one figure)
+# ---------------------------------------------------------------------------
+
+def plot_all_combined(log_paths, out_path):
+    """
+    One figure: rows = metrics, columns = runs.
+    Each cell shows train (blue) and val (orange dashed) curves.
+    """
+    # parse all logs, skip missing
+    runs = []
+    for lp in log_paths:
+        if not os.path.isfile(lp):
+            print(f'  [skip] not found: {lp}')
+            continue
+        data     = parse_log(lp)
+        if len(data['epochs']) == 0:
+            print(f'  [skip] no epochs parsed from {lp}')
+            continue
+        run_name = os.path.basename(os.path.dirname(os.path.abspath(lp)))
+        runs.append((run_name, data))
+
+    if not runs:
+        print('No valid log files to plot.')
+        return
+
+    # determine active metrics across all runs
+    active_metrics = []
+    for m in METRICS:
+        for _, data in runs:
+            if not np.all(np.isnan(data[f'train_{m}'])):
+                active_metrics.append(m)
+                break
+
+    n_rows = len(active_metrics)
+    n_cols = len(runs)
+
+    fig, axes = plt.subplots(n_rows, n_cols,
+                             figsize=(4.0 * n_cols, 3.2 * n_rows),
+                             squeeze=False)
+
+    for col, (run_name, data) in enumerate(runs):
+        epochs = data['epochs']
+        for row, m in enumerate(active_metrics):
+            ax = axes[row][col]
+            train_vals = data[f'train_{m}']
+            val_vals   = data[f'val_{m}']
+
+            ax.plot(epochs, train_vals, color='steelblue',  lw=1.5, label='train')
+            ax.plot(epochs, val_vals,   color='darkorange', lw=1.5, linestyle='--', label='val')
+
+            if not np.all(np.isnan(val_vals)):
+                best_idx = int(np.nanargmin(val_vals))
+                ax.axvline(epochs[best_idx], color='darkorange', lw=0.8,
+                           linestyle=':', alpha=0.7)
+
+            ax.set_title(f'{m}', fontsize=9)
+            ax.set_xlabel('epoch', fontsize=8)
+            if col == 0:
+                ax.set_ylabel('loss', fontsize=8)
+            ax.tick_params(labelsize=7)
+            ax.grid(True, alpha=0.3)
+            if row == 0:
+                ax.set_title(f'{run_name}\n{m}', fontsize=8)
+            if row == 0 and col == 0:
+                ax.legend(fontsize=7)
+
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    plt.savefig(out_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f'Saved combined plot: {out_path}')
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -141,14 +215,19 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--logs', nargs='+', required=True,
                         help='Paths to vae_training_log.txt files')
+    parser.add_argument('--combined_out', default=None,
+                        help='If set, save all runs in one combined PNG to this path')
     args = parser.parse_args()
 
-    for log_path in args.logs:
-        if not os.path.isfile(log_path):
-            print(f'  [skip] not found: {log_path}')
-            continue
-        print(f'Plotting: {log_path}')
-        plot_training(log_path)
+    if args.combined_out:
+        plot_all_combined(args.logs, args.combined_out)
+    else:
+        for log_path in args.logs:
+            if not os.path.isfile(log_path):
+                print(f'  [skip] not found: {log_path}')
+                continue
+            print(f'Plotting: {log_path}')
+            plot_training(log_path)
 
 
 if __name__ == '__main__':

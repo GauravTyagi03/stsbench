@@ -44,5 +44,7 @@ for f in "${EXISTING[@]}"; do echo "  $f"; done
 echo ""
 
 echo "Plotting training curves..."
-python3 plot_vae_training.py --logs "${EXISTING[@]}"
+python3 plot_vae_training.py \
+    --logs "${EXISTING[@]}" \
+    --combined_out /oak/stanford/groups/anishm/gtyagi/stsbench/vae/vae_training_curves_all.png
 echo "Done!"
