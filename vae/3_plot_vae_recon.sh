@@ -38,9 +38,18 @@ export MKL_NUM_THREADS=${N}
 export VECLIB_MAXIMUM_THREADS=${N}
 export NUMEXPR_NUM_THREADS=${N}
 
-# ---- Edit VAE_CONFIG to point to the config you want to inspect ----
-VAE_CONFIG="configs/ventral_vae_z128_beta001.yaml"
+# ---- List all configs to plot ----
+CONFIGS=(
+    configs/ventral_vae_z128_beta001.yaml
+    configs/ventral_vae_z128_twin10_temporal_alpha01.yaml
+    configs/ventral_vae_z128_twin10_temporal_alpha05.yaml
+    configs/ventral_vae_z128_twin10_temporal_alpha1.yaml
+    configs/ventral_vae_z128_twin10_nblocks2.yaml
+    configs/ventral_vae_z128_preonset_base.yaml
+    configs/ventral_vae_z128_preonset_temporal_alpha05.yaml
+    configs/ventral_vae_z128_preonset_nblocks2.yaml
+)
 
-echo "Plotting VAE reconstruction check..."
-python3 plot_vae_recon.py --config ${VAE_CONFIG} --n_samples 5
-echo "Done! See vae_recon_check.png in the config's output_dir."
+echo "Plotting VAE reconstruction for all configs..."
+python3 plot_vae_recon.py --configs "${CONFIGS[@]}" --n_samples 5
+echo "Done! Plots saved to each config's output_dir, named by model_name."

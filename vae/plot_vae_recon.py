@@ -3,19 +3,21 @@ Visually verify VAE reconstruction quality on neural timeseries.
 
 Produces two figures per run:
 
-  Figure 1 — neuron_traces.png
+  Figure 1 — {model_name}_neuron_traces.png
     Grid of (n_samples rows) × (n_neurons cols).
     Each cell: input (solid blue) vs recon (dashed red) over T time bins.
     Lets you directly compare individual data points and their reconstruction.
 
-  Figure 2 — scatter.png
+  Figure 2 — {model_name}_scatter.png
     One scatter panel per sample: every (T × N) input value on the x-axis,
     its reconstruction on the y-axis.  Identity line shown; R² in title.
     Gives a global sense of reconstruction fidelity across all neurons/bins.
 
 Usage:
-    python plot_vae_recon.py --config configs/ventral_vae_z128_beta001.yaml
-    python plot_vae_recon.py --config configs/ventral_vae_z128_beta001.yaml \
+    python plot_vae_recon.py --configs configs/ventral_vae_z128_beta001.yaml
+    python plot_vae_recon.py \
+        --configs configs/ventral_vae_z128_beta001.yaml \
+                  configs/ventral_vae_z128_twin10_temporal_alpha05.yaml \
         --sample_idx 0 3 7 --neuron_idx 0 50 100 200 314
 """
 
@@ -126,23 +128,12 @@ def plot_scatter(vae, dataset, sample_indices, out_path):
     print(f'Saved: {out_path}')
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--config',     default='configs/ventral_vae_z128_beta001.yaml', type=str)
-    parser.add_argument('--use_best',   action='store_true',
-                        help='Load vae_ckpt_best.pth instead of vae_ckpt.pth')
-    parser.add_argument('--sample_idx', nargs='+', type=int, default=None,
-                        help='Which test samples to plot (default: 5 evenly spaced)')
-    parser.add_argument('--neuron_idx', nargs='+', type=int, default=None,
-                        help='Which neurons to show in trace plot (default: 5 evenly spaced)')
-    parser.add_argument('--n_samples',  type=int, default=5)
-    parser.add_argument('--n_neurons',  type=int, default=5)
-    args = parser.parse_args()
-
-    config      = load_config(args.config)
+def run_one(config_path, use_best, sample_idx, neuron_idx, n_samples, n_neurons):
+    config      = load_config(config_path)
     dataset_cfg = config['dataset_params']
     vae_cfg     = config['vae_params']
     train_cfg   = config['train_params']
+    model_name  = config.get('model_name', os.path.splitext(os.path.basename(config_path))[0])
 
     set_seed(train_cfg.get('seed', 42))
 
@@ -157,30 +148,31 @@ def main():
     )
 
     vae = NeuralVAE(
-        num_neurons  = dataset_cfg['num_neurons'],
-        enc_channels = vae_cfg['enc_channels'],
-        z_channels   = vae_cfg['z_channels'],
-        kernel_size  = vae_cfg.get('kernel_size', 3),
-        num_groups   = vae_cfg.get('num_groups', 8),
+        num_neurons    = dataset_cfg['num_neurons'],
+        enc_channels   = vae_cfg['enc_channels'],
+        z_channels     = vae_cfg['z_channels'],
+        kernel_size    = vae_cfg.get('kernel_size', 3),
+        num_groups     = vae_cfg.get('num_groups', 8),
+        num_res_blocks = vae_cfg.get('num_res_blocks', 1),
     ).to(device)
 
-    ckpt_name = 'vae_ckpt_best.pth' if args.use_best else train_cfg['ckpt_name']
+    ckpt_name = 'vae_ckpt_best.pth' if use_best else train_cfg['ckpt_name']
     ckpt_path = os.path.join(train_cfg['ckpt_dir'], ckpt_name)
     vae.load_state_dict(torch.load(ckpt_path, map_location=device)['vae'])
     vae.eval()
 
-    N = dataset_cfg['num_neurons']
+    N      = dataset_cfg['num_neurons']
     n_test = len(test_dataset)
 
     sample_indices = (
-        args.sample_idx
-        if args.sample_idx is not None
-        else list(np.linspace(0, n_test - 1, args.n_samples, dtype=int))
+        sample_idx
+        if sample_idx is not None
+        else list(np.linspace(0, n_test - 1, n_samples, dtype=int))
     )
     neuron_indices = (
-        args.neuron_idx
-        if args.neuron_idx is not None
-        else list(np.linspace(0, N - 1, args.n_neurons, dtype=int))
+        neuron_idx
+        if neuron_idx is not None
+        else list(np.linspace(0, N - 1, n_neurons, dtype=int))
     )
 
     out_dir = train_cfg['output_dir']
@@ -188,12 +180,34 @@ def main():
 
     plot_traces(
         vae, test_dataset, sample_indices, neuron_indices,
-        os.path.join(out_dir, 'vae_neuron_traces.png'),
+        os.path.join(out_dir, f'{model_name}_neuron_traces.png'),
     )
     plot_scatter(
         vae, test_dataset, sample_indices,
-        os.path.join(out_dir, 'vae_scatter.png'),
+        os.path.join(out_dir, f'{model_name}_scatter.png'),
     )
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--configs',    nargs='+',
+                        default=['configs/ventral_vae_z128_beta001.yaml'],
+                        help='One or more config YAML files to plot')
+    parser.add_argument('--use_best',   action='store_true',
+                        help='Load vae_ckpt_best.pth instead of vae_ckpt.pth')
+    parser.add_argument('--sample_idx', nargs='+', type=int, default=None,
+                        help='Which test samples to plot (default: n_samples evenly spaced)')
+    parser.add_argument('--neuron_idx', nargs='+', type=int, default=None,
+                        help='Which neurons to show in trace plot (default: n_neurons evenly spaced)')
+    parser.add_argument('--n_samples',  type=int, default=5)
+    parser.add_argument('--n_neurons',  type=int, default=5)
+    args = parser.parse_args()
+
+    for config_path in args.configs:
+        print(f'\n--- Plotting: {config_path} ---')
+        run_one(config_path, args.use_best,
+                args.sample_idx, args.neuron_idx,
+                args.n_samples, args.n_neurons)
 
 
 if __name__ == '__main__':
