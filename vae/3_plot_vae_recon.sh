@@ -1,8 +1,8 @@
 #!/bin/bash
 #
 #SBATCH --job-name=plot_vae_recon
-#SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/ventral_stream/vae_z128_beta001/slurm_plot.%j.out
-#SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/ventral_stream/vae_z128_beta001/slurm_plot.%j.err
+#SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/vae/logs/slurm_plot.%j.out
+#SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/vae/logs/slurm_plot.%j.err
 #SBATCH --time=1:00:00
 #SBATCH --qos=normal
 #SBATCH -p anishm
@@ -22,7 +22,6 @@ module load py-torchvision/0.19.1_py312
 module load py-pillow/10.2.0_py312
 module load py-numpy/1.26.3_py312
 module load yaml-cpp/0.7.0
-module load py-matplotlib/3.8.2_py312
 
 unset PYTHONPATH
 export PYTHONNOUSERSITE=1
