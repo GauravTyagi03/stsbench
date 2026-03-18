@@ -16,6 +16,7 @@ Usage:
 
 import argparse
 import os
+import re
 import sys
 
 import torch
@@ -39,10 +40,18 @@ from ts_models.temporal_conditioner import TemporalNeuralConditioner
 # NeuralVAE lives in vae/models/ — add that directory directly to avoid
 # shadowing reconstruction/models/ with a second 'models' package
 sys.path.insert(0, os.path.join(_here, 'models'))
-from neural_vae import NeuralVAE
+from neural_vae import NeuralVAE, NeuralVAEDeep
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'Device: {device}')
+
+
+def remap_legacy_vae_state_dict(state_dict):
+    """Support checkpoints saved before res blocks were wrapped in nn.Sequential."""
+    return {
+        re.sub(r'\.(res\d+)\.(block|residual)\.', r'.\1.0.\2.', key): value
+        for key, value in state_dict.items()
+    }
 
 
 def run_sampling(
@@ -212,12 +221,14 @@ def main():
     vae_model_cfg   = vae_config['vae_params']
     vae_train_cfg   = vae_config['train_params']
 
-    vae_neural = NeuralVAE(
-        num_neurons  = vae_dataset_cfg['num_neurons'],
-        enc_channels = vae_model_cfg['enc_channels'],
-        z_channels   = vae_model_cfg['z_channels'],
-        kernel_size  = vae_model_cfg.get('kernel_size', 3),
-        num_groups   = vae_model_cfg.get('num_groups', 8),
+    vae_cls = NeuralVAEDeep if vae_model_cfg.get('model_class') == 'deep' else NeuralVAE
+    vae_neural = vae_cls(
+        num_neurons    = vae_dataset_cfg['num_neurons'],
+        enc_channels   = vae_model_cfg['enc_channels'],
+        z_channels     = vae_model_cfg['z_channels'],
+        kernel_size    = vae_model_cfg.get('kernel_size', 3),
+        num_groups     = vae_model_cfg.get('num_groups', 8),
+        num_res_blocks = vae_model_cfg.get('num_res_blocks', 1),
     ).to(device)
     vae_neural.eval()
 
@@ -225,7 +236,7 @@ def main():
     if not os.path.exists(vae_ckpt_path):
         raise FileNotFoundError(f'VAE checkpoint not found: {vae_ckpt_path}')
     vae_ckpt = torch.load(vae_ckpt_path, map_location=device)
-    vae_neural.load_state_dict(vae_ckpt['vae'])
+    vae_neural.load_state_dict(remap_legacy_vae_state_dict(vae_ckpt['vae']))
 
     # ---- output directory ----
     vae_model_name = vae_config.get('model_name', 'vae')

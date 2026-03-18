@@ -50,10 +50,15 @@ print(f'Device: {device}')
 
 
 def resolve(path, config_dir):
-    """Resolve a path relative to the config file's directory if not absolute."""
+    """Resolve paths the same way reconstruction scripts expect."""
     p = pathlib.Path(path)
     if not p.is_absolute():
-        return str(config_dir / p)
+        reconstruction_dir = pathlib.Path(_here).resolve().parent / 'reconstruction'
+        for base_dir in (reconstruction_dir, config_dir):
+            candidate = (base_dir / p).resolve()
+            if candidate.exists():
+                return str(candidate)
+        return str((reconstruction_dir / p).resolve())
     return path
 
 
