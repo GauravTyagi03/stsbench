@@ -208,6 +208,74 @@ def plot_all_combined(log_paths, out_path):
 
 
 # ---------------------------------------------------------------------------
+# Summary table
+# ---------------------------------------------------------------------------
+
+def generate_summary_table(log_paths, out_path):
+    """
+    Parse all logs and write a markdown table sorted by best_val_recon.
+
+    Columns: run | epochs | best_val_recon | best_epoch | final_val_recon
+             | final_train_recon | best_val_temporal | best_val_kl
+    """
+    rows = []
+    for lp in log_paths:
+        if not os.path.isfile(lp):
+            continue
+        data = parse_log(lp)
+        if len(data['epochs']) == 0:
+            continue
+        run_name = os.path.basename(os.path.dirname(os.path.abspath(lp)))
+        epochs     = data['epochs']
+        val_recon  = data['val_recon']
+        train_recon= data['train_recon']
+        val_temp   = data['val_temporal']
+        val_kl     = data['val_kl']
+
+        best_idx        = int(np.nanargmin(val_recon))
+        best_val_recon  = float(val_recon[best_idx])
+        best_epoch      = int(epochs[best_idx])
+        final_val_recon = float(val_recon[-1])
+        final_train_recon = float(train_recon[-1])
+
+        has_temporal    = not np.all(np.isnan(val_temp))
+        best_val_temp   = f'{float(val_temp[best_idx]):.6f}' if has_temporal else 'N/A'
+        best_val_kl     = f'{float(val_kl[best_idx]):.6f}' if not np.all(np.isnan(val_kl)) else 'N/A'
+
+        rows.append({
+            'run':               run_name,
+            'epochs':            int(epochs[-1]),
+            'best_val_recon':    best_val_recon,
+            'best_epoch':        best_epoch,
+            'final_val_recon':   final_val_recon,
+            'final_train_recon': final_train_recon,
+            'best_val_temporal': best_val_temp,
+            'best_val_kl':       best_val_kl,
+        })
+
+    rows.sort(key=lambda r: r['best_val_recon'])
+
+    header = ('| run | epochs | best_val_recon | best_epoch '
+              '| final_val_recon | final_train_recon | best_val_temporal | best_val_kl |')
+    sep    = ('|-----|--------|----------------|------------'
+              '|-----------------|-------------------|-------------------|-------------|')
+    lines  = [header, sep]
+    for r in rows:
+        lines.append(
+            f"| {r['run']} | {r['epochs']} | {r['best_val_recon']:.6f} "
+            f"| {r['best_epoch']} | {r['final_val_recon']:.6f} "
+            f"| {r['final_train_recon']:.6f} | {r['best_val_temporal']} | {r['best_val_kl']} |"
+        )
+
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    with open(out_path, 'w') as f:
+        f.write('# VAE Training Summary\n\n')
+        f.write(f'Runs: {len(rows)}  |  Sorted by best_val_recon (ascending)\n\n')
+        f.write('\n'.join(lines) + '\n')
+    print(f'Saved summary table: {out_path}')
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -217,6 +285,8 @@ def main():
                         help='Paths to vae_training_log.txt files')
     parser.add_argument('--combined_out', default=None,
                         help='If set, save all runs in one combined PNG to this path')
+    parser.add_argument('--summary_out', default=None,
+                        help='If set, write a markdown summary table to this path')
     args = parser.parse_args()
 
     if args.combined_out:
@@ -228,6 +298,9 @@ def main():
                 continue
             print(f'Plotting: {log_path}')
             plot_training(log_path)
+
+    if args.summary_out:
+        generate_summary_table(args.logs, args.summary_out)
 
 
 if __name__ == '__main__':
