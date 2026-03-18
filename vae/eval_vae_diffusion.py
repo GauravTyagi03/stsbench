@@ -139,6 +139,8 @@ def main():
                         help='Path to VAE YAML config')
     parser.add_argument('--diffusion_config', required=True, type=str,
                         help='Path to existing conv1d diffusion YAML config')
+    parser.add_argument('--run_id',           default='', type=str,
+                        help='Optional tag appended to output directory to avoid overwriting')
     args = parser.parse_args()
 
     vae_config  = load_config(args.vae_config)
@@ -226,10 +228,10 @@ def main():
     vae_neural.load_state_dict(vae_ckpt['vae'])
 
     # ---- output directory ----
-    # Use a sub-directory of the diffusion output dir, named after the VAE model
     vae_model_name = vae_config.get('model_name', 'vae')
+    suffix = f'_{args.run_id}' if args.run_id else ''
     output_dir = os.path.join(
-        train_params['output_dir'], f'vae_conditioned_{vae_model_name}'
+        train_params['output_dir'], f'vae_conditioned_{vae_model_name}{suffix}'
     )
     os.makedirs(output_dir, exist_ok=True)
     print(f'Saving images to: {output_dir}')

@@ -1,11 +1,11 @@
 #!/bin/bash
 #
-# Run eval_vae_diffusion.py after identifying the best VAE checkpoint.
-# Edit VAE_CONFIG below to point to the winning config before submitting.
+# Sample from the original static-conditioning DDPM using VAE-decoded +
+# time-averaged neural timeseries as the conditioning signal.
 #
-#SBATCH --job-name=vae_ts_ddpm
-#SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/vae/logs/slurm_vae_ts_ddpm.%j.out
-#SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/vae/logs/slurm_vae_ts_ddpm.%j.err
+#SBATCH --job-name=vae_orig_ddpm
+#SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/vae/logs/slurm_vae_orig_ddpm.%j.out
+#SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/vae/logs/slurm_vae_orig_ddpm.%j.err
 #SBATCH --time=4:00:00
 #SBATCH --qos=normal
 #SBATCH -p owners
@@ -45,12 +45,12 @@ export NUMEXPR_NUM_THREADS=${N}
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
 VAE_CONFIG="configs/ventral_vae_z128_wide_nb2.yaml"
-DIFFUSION_CONFIG="../timeseries/configs/ventral_stream_diffusion_ts_conv1d_k3_skip.yaml"
+DIFFUSION_CONFIG="/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/configs/ventral_stream_diffusion.yaml"
 
 mkdir -p /oak/stanford/groups/anishm/gtyagi/stsbench/vae/logs
 
-echo "Sampling from timeseries DDPM (conv1d_k3_skip) with VAE (wide_nb2) conditioning..."
-python3 eval_vae_diffusion.py \
+echo "Sampling from original DDPM with VAE (wide_nb2) encode->decode->time-mean conditioning..."
+python3 eval_vae_original_ddpm.py \
     --vae_config       ${VAE_CONFIG} \
     --diffusion_config ${DIFFUSION_CONFIG} \
     --run_id           ${SLURM_JOB_ID}
