@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-#SBATCH --job-name=vae_z128_twin10_ta05
+#SBATCH --job-name=twin10_ta05_vae_z128
 #SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/ventral_stream/vae_z128_twin10_temporal_alpha05/slurm_train.%j.out
 #SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/reconstruction/logs/ventral_stream/vae_z128_twin10_temporal_alpha05/slurm_train.%j.err
 #SBATCH --time=48:00:00
