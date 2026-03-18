@@ -49,7 +49,7 @@ mkdir -p logs/slurm
 # Run alternative time-series normalization script
 echo "Starting alternative time-series normalization..."
 python alternative_timeseries_norm.py \
-    --monkey monkeyF \
+    --monkey monkeyN \
     --data_dir /scratch/groups/anishm/tvsd/ \
     --output_dir /oak/stanford/groups/anishm/gtyagi/stsbench/normalization/results/ \
     --baseline_window 100 \

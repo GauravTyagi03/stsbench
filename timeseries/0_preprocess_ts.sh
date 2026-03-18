@@ -29,24 +29,15 @@ echo "-------------------------"
 cd /oak/stanford/groups/anishm/gtyagi/stsbench/timeseries
 mkdir -p logs/slurm
 
-# # ---- dorsal stream ----
-# echo "Preprocessing dorsal stream timeseries..."
-# python preprocess_timeseries.py \
-#     --timeseries_h5  /oak/stanford/groups/anishm/gtyagi/stsbench/results/monkeyF_timeseries_normalized.h5 \
-#     --raw_mat        /scratch/groups/anishm/tvsd/monkeyF_THINGS_MUA_trials.mat \
-#     --output_path    /oak/stanford/groups/anishm/gtyagi/stsbench/dataset/dorsal_stream_timeseries_preprocessed.h5 \
-#     --num_bins       15
-# echo "Dorsal preprocessing done."
-
-# ---- ventral stream ----
+# ---- ventral stream (both monkeys, correct V4 channels + reliability filter) ----
 echo "Preprocessing ventral stream timeseries..."
 python preprocess_timeseries.py \
-<<<<<<< HEAD
-    --timeseries_h5  /oak/stanford/groups/anishm/gtyagi/stsbench/results/normalization/monkeyF_timeseries_normalized.h5 \
-=======
-    --timeseries_h5  /oak/stanford/groups/anishm/gtyagi/stsbench/normalization/results/monkeyF_timeseries_normalized.h5 \
->>>>>>> 51d821048fa03da1919d4e9111d16e06de474d40
-    --raw_mat        /scratch/groups/anishm/tvsd/monkeyN_THINGS_MUA_trials.mat \
-    --output_path    /oak/stanford/groups/anishm/gtyagi/stsbench/dataset/ventral_stream_timeseries_preprocessed.h5 \
-    --num_bins       15
+    --timeseries_h5_N /oak/stanford/groups/anishm/gtyagi/stsbench/normalization/results/monkeyN_timeseries_normalized.h5 \
+    --timeseries_h5_F /oak/stanford/groups/anishm/gtyagi/stsbench/normalization/results/monkeyF_timeseries_normalized.h5 \
+    --raw_mat_N       /scratch/groups/anishm/tvsd/monkeyN_THINGS_MUA_trials.mat \
+    --raw_mat_F       /scratch/groups/anishm/tvsd/monkeyF_THINGS_MUA_trials.mat \
+    --paper_norm_N    /oak/stanford/groups/anishm/gtyagi/stsbench/results/monkeyN_paper_normalized.mat \
+    --paper_norm_F    /oak/stanford/groups/anishm/gtyagi/stsbench/results/monkeyF_paper_normalized.mat \
+    --output_path     /oak/stanford/groups/anishm/gtyagi/stsbench/dataset/ventral_stream_timeseries_preprocessed.h5 \
+    --num_bins        15
 echo "Ventral preprocessing done."

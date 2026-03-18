@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-#SBATCH --job-name=dorsal_sample_ts_conv1d_k7_skip
+#SBATCH --job-name=k7_skip_sample
 #SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/timeseries/logs/slurm/sample_ddpm_ts_conv1d_k7_skip.%j.out
 #SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/timeseries/logs/slurm/sample_ddpm_ts_conv1d_k7_skip.%j.err
 #SBATCH --time=4:00:00
