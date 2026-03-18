@@ -25,7 +25,7 @@ sys.path.insert(0, _here)
 from utils import load_config, set_seed
 
 from vae_dataset import SlidingWindowNeuralDataset
-from models.neural_vae import NeuralVAE, vae_loss
+from models.neural_vae import NeuralVAE, NeuralVAEDeep, vae_loss
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'Device: {device}')
@@ -77,7 +77,8 @@ def main():
     )
 
     # ---- model ----
-    vae = NeuralVAE(
+    vae_cls = NeuralVAEDeep if vae_cfg.get('model_class') == 'deep' else NeuralVAE
+    vae = vae_cls(
         num_neurons    = dataset_cfg['num_neurons'],
         enc_channels   = vae_cfg['enc_channels'],
         z_channels     = vae_cfg['z_channels'],

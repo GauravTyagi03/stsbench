@@ -159,6 +159,126 @@ class NeuralVAE(nn.Module):
         return recon, mu, logvar
 
 
+class EncoderDeep(nn.Module):
+    """
+    Variable-depth encoder: proj → (res_stage → downsample) × (N-1) → final_stage → mu/logvar.
+    enc_channels is an arbitrary-length tuple, e.g. (256, 128, 64) for two downsamples.
+    """
+    def __init__(self, num_neurons=315, enc_channels=(256, 128), z_channels=128,
+                 kernel_size=3, num_groups=8, num_res_blocks=1):
+        super().__init__()
+        padding = kernel_size // 2
+
+        self.proj = nn.Conv1d(num_neurons, enc_channels[0], kernel_size, padding=padding)
+
+        self.stages = nn.ModuleList()
+        self.downs   = nn.ModuleList()
+        for i in range(len(enc_channels) - 1):
+            c, c_next = enc_channels[i], enc_channels[i + 1]
+            self.stages.append(nn.Sequential(
+                *[Conv1dResBlock(c, c, kernel_size, num_groups) for _ in range(num_res_blocks)]
+            ))
+            self.downs.append(nn.Conv1d(c, c_next, kernel_size, padding=padding, stride=2))
+
+        c_last = enc_channels[-1]
+        self.final_stage = nn.Sequential(
+            *[Conv1dResBlock(c_last, c_last, kernel_size, num_groups) for _ in range(num_res_blocks)]
+        )
+        self.norm        = nn.GroupNorm(min(num_groups, c_last), c_last)
+        self.act         = nn.SiLU()
+        self.mu_conv     = nn.Conv1d(c_last, z_channels, 1)
+        self.logvar_conv = nn.Conv1d(c_last, z_channels, 1)
+
+    def forward(self, x):
+        h = self.proj(x)
+        for stage, down in zip(self.stages, self.downs):
+            h = stage(h)
+            h = down(h)
+        h = self.final_stage(h)
+        h = self.act(self.norm(h))
+        return self.mu_conv(h), self.logvar_conv(h)
+
+
+class DecoderDeep(nn.Module):
+    """
+    Mirror of EncoderDeep: post_z → (res_stage → upsample) × (N-1) → final_stage → out_conv.
+    enc_channels should be the same tuple passed to EncoderDeep (forward order).
+    """
+    def __init__(self, num_neurons=315, enc_channels=(256, 128), z_channels=128,
+                 kernel_size=3, num_groups=8, num_res_blocks=1):
+        super().__init__()
+        rev = list(reversed(enc_channels))   # decoder runs in reverse channel order
+
+        self.post_z = nn.Conv1d(z_channels, rev[0], 1)
+
+        self.stages = nn.ModuleList()
+        self.ups     = nn.ModuleList()
+        for i in range(len(rev) - 1):
+            c, c_next = rev[i], rev[i + 1]
+            self.stages.append(nn.Sequential(
+                *[Conv1dResBlock(c, c, kernel_size, num_groups) for _ in range(num_res_blocks)]
+            ))
+            self.ups.append(nn.ConvTranspose1d(c, c_next, kernel_size=2, stride=2))
+
+        c_last = rev[-1]
+        self.final_stage = nn.Sequential(
+            *[Conv1dResBlock(c_last, c_last, kernel_size, num_groups) for _ in range(num_res_blocks)]
+        )
+        self.norm     = nn.GroupNorm(min(num_groups, c_last), c_last)
+        self.act      = nn.SiLU()
+        self.out_conv = nn.Conv1d(c_last, num_neurons, kernel_size, padding=kernel_size // 2)
+
+    def forward(self, z):
+        h = self.post_z(z)
+        for stage, up in zip(self.stages, self.ups):
+            h = stage(h)
+            h = up(h)
+        h = self.final_stage(h)
+        h = self.act(self.norm(h))
+        return self.out_conv(h)
+
+
+class NeuralVAEDeep(nn.Module):
+    """
+    Drop-in replacement for NeuralVAE that supports arbitrary-depth enc_channels.
+    Use model_class: 'deep' in the config to select this class.
+
+    Input:  (B, N, T_win)
+    Latent: (B, z_ch, T_win // 2^(num_stages))
+    Output: (B, T_win, N)  — transposed, same as NeuralVAE.forward()
+    """
+    def __init__(self, num_neurons=315, enc_channels=(256, 128), z_channels=128,
+                 kernel_size=3, num_groups=8, num_res_blocks=1):
+        super().__init__()
+        self.encoder = EncoderDeep(num_neurons, enc_channels, z_channels,
+                                   kernel_size, num_groups, num_res_blocks)
+        self.decoder = DecoderDeep(num_neurons, enc_channels, z_channels,
+                                   kernel_size, num_groups, num_res_blocks)
+
+    def reparameterize(self, mu, logvar):
+        if self.training:
+            std = torch.exp(0.5 * logvar)
+            return mu + torch.randn_like(std) * std
+        return mu
+
+    def encode(self, x):
+        return self.encoder(x)
+
+    def decode(self, z, T_win=None):
+        out = self.decoder(z)
+        if T_win is not None:
+            out = out[:, :, :T_win]
+        return out
+
+    def forward(self, x):
+        T_win = x.shape[2]
+        mu, logvar = self.encode(x)
+        z = self.reparameterize(mu, logvar)
+        recon_spatial = self.decode(z, T_win=T_win)      # (B, N, T_win)
+        recon = recon_spatial.transpose(1, 2)             # (B, T_win, N)
+        return recon, mu, logvar
+
+
 def vae_loss(recon, target, mu, logvar, beta=0.001, temporal_alpha=0.0):
     """
     recon:  (B, T_win, N)
