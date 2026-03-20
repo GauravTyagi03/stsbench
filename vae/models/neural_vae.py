@@ -9,8 +9,15 @@ Architecture:
   No skip connections between encoder and decoder.
 """
 
+import math
+
 import torch
 import torch.nn as nn
+
+
+def _conv1d_out_length(L, kernel_size, stride, padding):
+    """Output length of a Conv1d with given parameters."""
+    return math.floor((L + 2 * padding - kernel_size) / stride) + 1
 
 
 class Conv1dResBlock(nn.Module):
@@ -276,6 +283,155 @@ class NeuralVAEDeep(nn.Module):
         z = self.reparameterize(mu, logvar)
         recon_spatial = self.decode(z, T_win=T_win)      # (B, N, T_win)
         recon = recon_spatial.transpose(1, 2)             # (B, T_win, N)
+        return recon, mu, logvar
+
+
+class EncoderFlat(nn.Module):
+    """
+    Same Conv1d path as EncoderDeep, then mean-pool over T to produce flat (B, z_channels)
+    mu and logvar.  enc_channels is an arbitrary-length tuple identical to EncoderDeep.
+    """
+    def __init__(self, num_neurons=315, enc_channels=(512, 256),
+                 z_channels=128, kernel_size=3, num_groups=8, num_res_blocks=2):
+        super().__init__()
+        padding = kernel_size // 2
+
+        self.proj = nn.Conv1d(num_neurons, enc_channels[0], kernel_size, padding=padding)
+
+        self.stages = nn.ModuleList()
+        self.downs   = nn.ModuleList()
+        for i in range(len(enc_channels) - 1):
+            c, c_next = enc_channels[i], enc_channels[i + 1]
+            self.stages.append(nn.Sequential(
+                *[Conv1dResBlock(c, c, kernel_size, num_groups) for _ in range(num_res_blocks)]
+            ))
+            self.downs.append(nn.Conv1d(c, c_next, kernel_size, padding=padding, stride=2))
+
+        c_last = enc_channels[-1]
+        self.final_stage = nn.Sequential(
+            *[Conv1dResBlock(c_last, c_last, kernel_size, num_groups) for _ in range(num_res_blocks)]
+        )
+        self.norm        = nn.GroupNorm(min(num_groups, c_last), c_last)
+        self.act         = nn.SiLU()
+        # flat: mean-pool over T then project to mu/logvar
+        self.mu_proj     = nn.Linear(c_last, z_channels)
+        self.logvar_proj = nn.Linear(c_last, z_channels)
+
+    def forward(self, x):
+        h = self.proj(x)
+        for stage, down in zip(self.stages, self.downs):
+            h = stage(h)
+            h = down(h)
+        h = self.final_stage(h)
+        h = self.act(self.norm(h))
+        h = h.mean(dim=2)                              # (B, c_last) — mean-pool over T
+        return self.mu_proj(h), self.logvar_proj(h)    # (B, z_channels) each
+
+
+class DecoderFlat(nn.Module):
+    """
+    z: (B, z_channels) → Linear → reshape → (B, c_last, T_lat)
+    → ConvTranspose1d upsample stages (mirror of EncoderFlat) → (B, N, T_win).
+
+    T_win and kernel_size must match the encoder so T_lat is computed correctly.
+    """
+    def __init__(self, num_neurons=315, enc_channels=(512, 256),
+                 z_channels=128, T_win=10, kernel_size=3, num_groups=8, num_res_blocks=2):
+        super().__init__()
+        n_downs = len(enc_channels) - 1
+        padding = kernel_size // 2
+
+        # simulate encoder's stride-2 conv operations to get T_lat
+        T_lat = T_win
+        for _ in range(n_downs):
+            T_lat = _conv1d_out_length(T_lat, kernel_size, 2, padding)
+
+        self.T_lat = T_lat
+        self.T_win = T_win
+
+        rev     = list(reversed(enc_channels))
+        c_first = rev[0]  # enc_channels[-1]
+
+        self.z_proj  = nn.Linear(z_channels, c_first * T_lat)
+        self.c_first = c_first
+
+        self.stages = nn.ModuleList()
+        self.ups     = nn.ModuleList()
+        for i in range(len(rev) - 1):
+            c, c_next = rev[i], rev[i + 1]
+            self.stages.append(nn.Sequential(
+                *[Conv1dResBlock(c, c, kernel_size, num_groups) for _ in range(num_res_blocks)]
+            ))
+            self.ups.append(nn.ConvTranspose1d(c, c_next, kernel_size=2, stride=2))
+
+        c_last = rev[-1]
+        self.final_stage = nn.Sequential(
+            *[Conv1dResBlock(c_last, c_last, kernel_size, num_groups) for _ in range(num_res_blocks)]
+        )
+        self.norm     = nn.GroupNorm(min(num_groups, c_last), c_last)
+        self.act      = nn.SiLU()
+        self.out_conv = nn.Conv1d(c_last, num_neurons, kernel_size, padding=padding)
+
+    def forward(self, z):
+        # z: (B, z_channels)
+        B = z.shape[0]
+        h = self.z_proj(z)
+        h = h.view(B, self.c_first, self.T_lat)   # (B, c_first, T_lat)
+        for stage, up in zip(self.stages, self.ups):
+            h = stage(h)
+            h = up(h)
+        h = self.final_stage(h)
+        h = self.act(self.norm(h))
+        out = self.out_conv(h)
+        return out[:, :, :self.T_win]              # trim to exact T_win
+
+
+class NeuralVAEFlat(nn.Module):
+    """
+    VAE with a flat (B, z_channels) latent — no temporal dimension in the latent space.
+    The encoder mean-pools over T before producing mu/logvar; the decoder broadcasts a
+    single vector back across time.  Use model_class: 'flat' in the config.
+
+    Input:  (B, N, T_win)
+    Latent: (B, z_channels)   — scalar vector, no time axis
+    Output: (B, T_win, N)     — transposed, same interface as NeuralVAE.forward()
+
+    T_win must be passed at construction time so DecoderFlat can compute T_lat.
+    """
+    def __init__(self, num_neurons=315, enc_channels=(512, 256),
+                 z_channels=128, T_win=10, kernel_size=3, num_groups=8, num_res_blocks=2):
+        super().__init__()
+        self.encoder = EncoderFlat(num_neurons, enc_channels, z_channels,
+                                   kernel_size, num_groups, num_res_blocks)
+        self.decoder = DecoderFlat(num_neurons, enc_channels, z_channels, T_win,
+                                   kernel_size, num_groups, num_res_blocks)
+
+    def reparameterize(self, mu, logvar):
+        if self.training:
+            std = torch.exp(0.5 * logvar)
+            return mu + torch.randn_like(std) * std
+        return mu
+
+    def encode(self, x):
+        """x: (B, N, T_win) → mu, logvar: (B, z_channels) each"""
+        return self.encoder(x)
+
+    def decode(self, z, T_win=None):
+        """z: (B, z_channels) → (B, N, T_win)"""
+        return self.decoder(z)
+
+    def forward(self, x):
+        """
+        x: (B, N, T_win)
+        returns:
+          recon:  (B, T_win, N)  — transposed
+          mu:     (B, z_channels)
+          logvar: (B, z_channels)
+        """
+        mu, logvar = self.encode(x)
+        z = self.reparameterize(mu, logvar)
+        recon_spatial = self.decode(z)         # (B, N, T_win)
+        recon = recon_spatial.transpose(1, 2)  # (B, T_win, N)
         return recon, mu, logvar
 
 

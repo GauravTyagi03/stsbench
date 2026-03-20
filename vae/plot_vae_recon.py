@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.join(_here, 'models'))
 
 from utils import load_config, set_seed
 from vae_dataset import SlidingWindowNeuralDataset
-from neural_vae import NeuralVAE, NeuralVAEDeep
+from neural_vae import NeuralVAE, NeuralVAEDeep, NeuralVAEFlat
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -138,7 +138,10 @@ def run_one(config_path, use_best, sample_idx, neuron_idx, n_samples, n_neurons)
 
     set_seed(train_cfg.get('seed', 42))
 
-    T_win = dataset_cfg['num_bins']
+    mc = vae_cfg.get('model_class', 'default')
+    # flat models were trained on T_win windows — use that size for eval too,
+    # since their decoder outputs exactly T_win bins regardless of input length.
+    T_win = dataset_cfg['T_win'] if mc == 'flat' else dataset_cfg['num_bins']
     test_dataset = SlidingWindowNeuralDataset(
         h5_path     = dataset_cfg['timeseries_h5_path'],
         split       = 'test',
@@ -148,7 +151,15 @@ def run_one(config_path, use_best, sample_idx, neuron_idx, n_samples, n_neurons)
         num_neurons = dataset_cfg['num_neurons'],
     )
 
-    vae_cls = NeuralVAEDeep if vae_cfg.get('model_class') == 'deep' else NeuralVAE
+    if mc == 'flat':
+        vae_cls      = NeuralVAEFlat
+        extra_kwargs = {'T_win': dataset_cfg['T_win']}
+    elif mc == 'deep':
+        vae_cls      = NeuralVAEDeep
+        extra_kwargs = {}
+    else:
+        vae_cls      = NeuralVAE
+        extra_kwargs = {}
     vae = vae_cls(
         num_neurons    = dataset_cfg['num_neurons'],
         enc_channels   = vae_cfg['enc_channels'],
@@ -156,6 +167,7 @@ def run_one(config_path, use_best, sample_idx, neuron_idx, n_samples, n_neurons)
         kernel_size    = vae_cfg.get('kernel_size', 3),
         num_groups     = vae_cfg.get('num_groups', 8),
         num_res_blocks = vae_cfg.get('num_res_blocks', 1),
+        **extra_kwargs,
     ).to(device)
 
     ckpt_name = 'vae_ckpt_best.pth' if use_best else train_cfg['ckpt_name']
