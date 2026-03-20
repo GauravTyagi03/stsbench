@@ -39,18 +39,15 @@ export NUMEXPR_NUM_THREADS=${N}
 
 # ---- List all configs to plot ----
 CONFIGS=(
-    configs/ventral_vae_z128_nb3.yaml
-    configs/ventral_vae_z128_nb2_a01.yaml
-    configs/ventral_vae_z128_nb3_a01.yaml
-    configs/ventral_vae_z128_nb2_k7.yaml
-    configs/ventral_vae_z128_nb2_k9.yaml
-    configs/ventral_vae_z128_nb2_k7_a01.yaml
-    configs/ventral_vae_z128_3stage_nb2.yaml
-    configs/ventral_vae_z128_3stage_nb2_a01.yaml
-    configs/ventral_vae_z128_wide_nb2.yaml
-    configs/ventral_vae_z128_wide_nb2_a01.yaml
-    configs/ventral_vae_z128_nb2_a05.yaml
-    configs/ventral_vae_z128_nb2_k7_a05.yaml
+    configs/ventral_vae_z128_flat_nb2.yaml
+    configs/ventral_vae_z128_flat_twin15.yaml
+    configs/ventral_vae_z256_flat_nb2.yaml
+    configs/ventral_vae_z128_wide_nb2_twin15.yaml
+    configs/ventral_vae_z128_wide_nb2_b01.yaml
+    configs/ventral_vae_z128_wide_nb2_b005.yaml
+    configs/ventral_vae_z128_twin10_nb2_e200.yaml
+    configs/ventral_vae_z128_beta001_e200.yaml
+    configs/ventral_vae_z128_wide_nb3_wide3.yaml
 )
 
 

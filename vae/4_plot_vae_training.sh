@@ -46,6 +46,6 @@ echo ""
 echo "Plotting training curves..."
 python3 plot_vae_training.py \
     --logs "${EXISTING[@]}" \
-    --combined_out /oak/stanford/groups/anishm/gtyagi/stsbench/vae/vae_training_curves_all.png \
-    --summary_out  /oak/stanford/groups/anishm/gtyagi/stsbench/vae/vae_training_summary.md
+    --combined_out /oak/stanford/groups/anishm/gtyagi/stsbench/vae/vae_training_curves_all_v2.png \
+    --summary_out  /oak/stanford/groups/anishm/gtyagi/stsbench/vae/vae_training_summary_v2.md
 echo "Done!"
