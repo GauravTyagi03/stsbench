@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-#SBATCH --job-name=dorsal_sample_ts_mean_raw
+#SBATCH --job-name=3_mean_sample
 #SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/timeseries/logs/slurm/sample_ddpm_ts_mean_raw.%j.out
 #SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/timeseries/logs/slurm/sample_ddpm_ts_mean_raw.%j.err
 #SBATCH --time=4:00:00
