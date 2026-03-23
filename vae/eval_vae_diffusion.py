@@ -40,7 +40,7 @@ from ts_models.temporal_conditioner import TemporalNeuralConditioner
 # NeuralVAE lives in vae/models/ — add that directory directly to avoid
 # shadowing reconstruction/models/ with a second 'models' package
 sys.path.insert(0, os.path.join(_here, 'models'))
-from neural_vae import NeuralVAE, NeuralVAEDeep
+from neural_vae import NeuralVAE, NeuralVAEDeep, NeuralVAEFlat
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'Device: {device}')
@@ -92,9 +92,14 @@ def run_sampling(
         neural_recon = recon_t.transpose(1, 2)       # (1, 15, N)
 
         # ---- conditioner ----
-        cond_input   = temporal_cond(neural_recon)                            # (1, T, d_model)
-        null_raw     = torch.zeros(1, num_bins, num_neurons, device=device)
-        uncond_input = temporal_cond(null_raw)                                # (1, T, d_model)
+        if temporal_cond is None:
+            # mean_raw: average over T → (1, 1, N)
+            cond_input   = neural_recon.mean(dim=1, keepdim=True)
+            uncond_input = torch.zeros(1, 1, num_neurons, device=device)
+        else:
+            cond_input   = temporal_cond(neural_recon)                        # (1, T, d_model)
+            null_raw     = torch.zeros(1, num_bins, num_neurons, device=device)
+            uncond_input = temporal_cond(null_raw)                            # (1, T, d_model)
 
         cf_guidance_scale = train_config.get('cf_guidance_scale', 1.0)
 
@@ -168,7 +173,6 @@ def main():
     num_bins    = neural_cfg['num_bins']
     num_neurons = neural_cfg['num_neurons']
     temporal_encoder_type = neural_cfg.get('temporal_encoder_type', 'conv1d')
-    temporal_d_model      = neural_cfg['temporal_d_model']
 
     # ---- noise scheduler ----
     scheduler = LinearNoiseScheduler(
@@ -184,17 +188,21 @@ def main():
     ).to(device)
     model.eval()
 
-    # ---- TemporalNeuralConditioner ----
-    temporal_cond = TemporalNeuralConditioner(
-        n_neurons            = num_neurons,
-        d_model              = temporal_d_model,
-        num_bins             = num_bins,
-        dropout              = neural_cfg.get('temporal_dropout', 0.0),
-        temporal_encoder_type= temporal_encoder_type,
-        conv_kernel_size     = neural_cfg.get('conv_kernel_size', 3),
-        bin_start            = neural_cfg.get('bin_start', 0),
-    ).to(device)
-    temporal_cond.eval()
+    # ---- TemporalNeuralConditioner (skipped for mean_raw) ----
+    if temporal_encoder_type == 'mean_raw':
+        temporal_cond = None
+    else:
+        temporal_d_model = neural_cfg['temporal_d_model']
+        temporal_cond = TemporalNeuralConditioner(
+            n_neurons            = num_neurons,
+            d_model              = temporal_d_model,
+            num_bins             = num_bins,
+            dropout              = neural_cfg.get('temporal_dropout', 0.0),
+            temporal_encoder_type= temporal_encoder_type,
+            conv_kernel_size     = neural_cfg.get('conv_kernel_size', 3),
+            bin_start            = neural_cfg.get('bin_start', 0),
+        ).to(device)
+        temporal_cond.eval()
 
     # ---- load diffusion checkpoint ----
     ldm_ckpt = os.path.join(train_params['ckpt_dir'], train_params['ldm_ckpt_name'])
@@ -202,7 +210,8 @@ def main():
         raise FileNotFoundError(f'Diffusion checkpoint not found: {ldm_ckpt}')
     ckpt = torch.load(ldm_ckpt, map_location=device)
     model.load_state_dict(ckpt['model'])
-    temporal_cond.load_state_dict(ckpt['temporal_cond'])
+    if temporal_cond is not None:
+        temporal_cond.load_state_dict(ckpt['temporal_cond'])
 
     # ---- VQVAE (image decoder) ----
     vqvae = VQVAE(
@@ -221,7 +230,16 @@ def main():
     vae_model_cfg   = vae_config['vae_params']
     vae_train_cfg   = vae_config['train_params']
 
-    vae_cls = NeuralVAEDeep if vae_model_cfg.get('model_class') == 'deep' else NeuralVAE
+    vae_mc = vae_model_cfg.get('model_class', 'default')
+    if vae_mc == 'flat':
+        vae_cls      = NeuralVAEFlat
+        vae_extra_kw = {'T_win': vae_dataset_cfg['T_win']}
+    elif vae_mc == 'deep':
+        vae_cls      = NeuralVAEDeep
+        vae_extra_kw = {}
+    else:
+        vae_cls      = NeuralVAE
+        vae_extra_kw = {}
     vae_neural = vae_cls(
         num_neurons    = vae_dataset_cfg['num_neurons'],
         enc_channels   = vae_model_cfg['enc_channels'],
@@ -229,6 +247,7 @@ def main():
         kernel_size    = vae_model_cfg.get('kernel_size', 3),
         num_groups     = vae_model_cfg.get('num_groups', 8),
         num_res_blocks = vae_model_cfg.get('num_res_blocks', 1),
+        **vae_extra_kw,
     ).to(device)
     vae_neural.eval()
 
