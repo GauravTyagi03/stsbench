@@ -39,15 +39,7 @@ export NUMEXPR_NUM_THREADS=${N}
 
 # ---- List all configs to plot ----
 CONFIGS=(
-    configs/ventral_vae_z128_flat_nb2.yaml
-    configs/ventral_vae_z128_flat_twin15.yaml
-    configs/ventral_vae_z256_flat_nb2.yaml
-    configs/ventral_vae_z128_wide_nb2_twin15.yaml
-    configs/ventral_vae_z128_wide_nb2_b01.yaml
-    configs/ventral_vae_z128_wide_nb2_b005.yaml
-    configs/ventral_vae_z128_twin10_nb2_e200.yaml
-    configs/ventral_vae_z128_beta001_e200.yaml
-    configs/ventral_vae_z128_wide_nb3_wide3.yaml
+    configs/ventral_vae_z128_twin10_nb2_e500.yaml
 )
 
 
