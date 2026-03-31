@@ -44,12 +44,14 @@ export NUMEXPR_NUM_THREADS=${N}
 
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
-VAE_CONFIG="configs/ventral_vae_z128_twin10_nb2_e200.yaml"
-DIFFUSION_CONFIG="../timeseries/configs/ventral_stream_diffusion_ts_mean_raw.yaml"
-
+#VAE_CONFIG="configs/ventral_vae_z128_twin10_nb2_e200.yaml"
+VAE_CONFIG="configs/ventral_vae_z128_flat_twin30_nb30.yaml"
+#DIFFUSION_CONFIG="../timeseries/configs/ventral_stream_diffusion_ts_mean_raw.yaml"
+#DIFFUSION_CONFIG="../timeseries/configs/ventral_stream_diffusion_ts_conv1d_k3_skip_vaerecon.yaml"
+DIFFUSION_CONFIG="../timeseries/configs/nb30/ventral_stream_diffusion_ts_conv1d_k3_skip_nb30.yaml"
 mkdir -p /oak/stanford/groups/anishm/gtyagi/stsbench/vae/logs
 
-echo "Sampling from timeseries DDPM (mean_raw) with VAE (2 layer, 200 epoch, window 10) conditioning..."
+echo "Sampling from timeseries DDPM with VAE (2 layer, 200 epoch, window 10) conditioning and nb30 timeseries..."
 python3 eval_vae_diffusion.py \
     --vae_config       ${VAE_CONFIG} \
     --diffusion_config ${DIFFUSION_CONFIG} \
