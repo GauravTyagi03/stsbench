@@ -192,7 +192,10 @@ def main():
     if temporal_encoder_type == 'mean_raw':
         temporal_cond = None
     else:
-        temporal_d_model = neural_cfg['temporal_d_model']
+        # Must match training; train_ddpm_cond_ts requires neural_embed_dim == temporal_d_model
+        temporal_d_model = neural_cfg.get(
+            'temporal_d_model', neural_cfg['neural_embed_dim']
+        )
         temporal_cond = TemporalNeuralConditioner(
             n_neurons            = num_neurons,
             d_model              = temporal_d_model,
