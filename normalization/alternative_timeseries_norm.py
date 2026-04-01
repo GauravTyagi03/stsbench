@@ -380,7 +380,8 @@ class TimeseriesNormalization:
     def fit_transform(
         self,
         allmua: np.ndarray,
-        allmat: np.ndarray
+        allmat: np.ndarray,
+        no_baseline_norm: bool = False,
     ) -> Tuple[np.ndarray, np.ndarray, Dict]:
         """
         Complete two-stage normalization pipeline.
@@ -388,22 +389,30 @@ class TimeseriesNormalization:
         Args:
             allmua: (n_timepoints, n_electrodes, n_trials)
             allmat: (6, n_trials)
+            no_baseline_norm: if True, skip Stage 1 and pass raw MUA directly to Stage 2.
 
         Returns:
             baseline_normalized: (n_timepoints, n_electrodes, n_trials)
+                                 Same as allmua (unmodified) when no_baseline_norm=True.
             final_normalized: (truncated_length, n_electrodes, n_trials) where
                             truncated_length = n_bins * bin_width
             metadata: Combined statistics from both stages
         """
-        # Stage 1: Baseline normalization
-        baseline_normalized, stage1_stats = self.stage1_baseline_norm(allmua)
+        if no_baseline_norm:
+            print("\nStage 1: SKIPPED (--no_baseline_norm flag set)")
+            baseline_normalized = allmua
+            stage1_stats = {'skipped': True}
+        else:
+            # Stage 1: Baseline normalization
+            baseline_normalized, stage1_stats = self.stage1_baseline_norm(allmua)
 
         # Stage 2: Bin normalization (operates on individual timepoints, not averages)
         final_normalized, stage2_stats = self.stage2_bin_norm(baseline_normalized, allmat)
 
         # Combine metadata
         metadata = {
-            'baseline_window': self.baseline_window,
+            'baseline_window': self.baseline_window if not no_baseline_norm else 0,
+            'no_baseline_norm': no_baseline_norm,
             'bin_width': self.bin_width,
             'stage1': stage1_stats,
             'stage2': stage2_stats,
@@ -485,6 +494,9 @@ def main():
                         help='Number of baseline timepoints (default: 100)')
     parser.add_argument('--bin_width', type=int, default=10,
                         help='Bin width in timepoints (default: 10)')
+    parser.add_argument('--no_baseline_norm', action='store_true',
+                        help='Skip Stage 1 (pre-stimulus baseline z-score); '
+                             'Stage 2 per-(electrode, day, bin) normalization still runs.')
 
     args = parser.parse_args()
 
@@ -495,7 +507,7 @@ def main():
     print("ALTERNATIVE TIME-SERIES NORMALIZATION")
     print("="*60)
     print(f"Monkey: {args.monkey}")
-    print(f"Baseline window: {args.baseline_window} timepoints")
+    print(f"Baseline norm: {'DISABLED' if args.no_baseline_norm else f'{args.baseline_window} timepoints'}")
     print(f"Bin width: {args.bin_width} timepoints")
     print("="*60)
 
@@ -514,7 +526,9 @@ def main():
 
     # Normalize
     print("\nApplying two-stage normalization...")
-    baseline_normalized, final_normalized, metadata = normalizer.fit_transform(allmua, allmat)
+    baseline_normalized, final_normalized, metadata = normalizer.fit_transform(
+        allmua, allmat, no_baseline_norm=args.no_baseline_norm
+    )
 
     print("\n" + "="*60)
     print("RESULTS")
@@ -547,17 +561,21 @@ def main():
     print(f"Final mean: {metadata['final_mean']:.6f}")
     print(f"Final std: {metadata['final_std']:.6f}")
 
-    # Save baseline-normalized data (intermediate result) as HDF5 for large arrays and partial loading
-    baseline_file = os.path.join(args.output_dir, f'{args.monkey}_baseline_normalized.h5')
-    print(f"\nSaving baseline-normalized data to {baseline_file}")
-    with h5py.File(baseline_file, 'w') as f:
-        _write_h5_array(f, 'baseline_normalized', baseline_normalized)
-        f.create_dataset('tb', data=tb_for_saving)
-        f.attrs['baseline_window'] = args.baseline_window
+    suffix = '_no_baseline' if args.no_baseline_norm else ''
+
+    # Save baseline-normalized data (intermediate result); skipped when no_baseline_norm is set
+    # since baseline_normalized is just the raw allmua in that case.
+    if not args.no_baseline_norm:
+        baseline_file = os.path.join(args.output_dir, f'{args.monkey}_baseline_normalized.h5')
+        print(f"\nSaving baseline-normalized data to {baseline_file}")
+        with h5py.File(baseline_file, 'w') as f:
+            _write_h5_array(f, 'baseline_normalized', baseline_normalized)
+            f.create_dataset('tb', data=tb_for_saving)
+            f.attrs['baseline_window'] = args.baseline_window
     del baseline_normalized  # Free full-size array before saving final outputs
 
     # Save final normalized data as HDF5
-    final_file = os.path.join(args.output_dir, f'{args.monkey}_timeseries_normalized.h5')
+    final_file = os.path.join(args.output_dir, f'{args.monkey}_timeseries_normalized{suffix}.h5')
     print(f"Saving final normalized data to {final_file}")
     with h5py.File(final_file, 'w') as f:
         _write_h5_array(f, 'timeseries_normalized', final_normalized)
@@ -567,10 +585,11 @@ def main():
         n_bins = final_normalized.shape[0] // args.bin_width
         f.attrs['n_bins'] = n_bins
         f.attrs['n_timepoints'] = final_normalized.shape[0]
+        f.attrs['no_baseline_norm'] = args.no_baseline_norm
         f.attrs['note'] = 'Output preserves timepoint granularity (not averaged into bins)'
 
     # Save metadata as JSON
-    metadata_file = os.path.join(args.output_dir, f'{args.monkey}_normalization_metadata.json')
+    metadata_file = os.path.join(args.output_dir, f'{args.monkey}_normalization_metadata{suffix}.json')
     print(f"Saving metadata to {metadata_file}")
     with open(metadata_file, 'w') as f:
         json.dump(metadata, f, indent=2)

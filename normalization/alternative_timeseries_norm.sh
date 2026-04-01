@@ -1,8 +1,8 @@
 #!/bin/bash
 #
-#SBATCH --job-name=timeseries_norm
-#SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/normalization/logs/slurm/timeseries_norm.%j.out
-#SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/normalization/logs/slurm/timeseries_norm.%j.err
+#SBATCH --job-name=timeseries_norm_no_baseline
+#SBATCH --output=/oak/stanford/groups/anishm/gtyagi/stsbench/normalization/logs/slurm/timeseries_norm_no_baseline.%j.out
+#SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/normalization/logs/slurm/timeseries_norm_no_baseline.%j.err
 #SBATCH --time=4:00:00
 #SBATCH --qos=normal
 #SBATCH -p owners
@@ -46,13 +46,27 @@ cd /oak/stanford/groups/anishm/gtyagi/stsbench/normalization
 # Create logs directory if it doesn't exist
 mkdir -p logs/slurm
 
-# Run alternative time-series normalization script
-echo "Starting alternative time-series normalization..."
+# Run alternative time-series normalization (no pre-stimulus baseline subtraction)
+# Outputs: monkeyN_timeseries_normalized_no_baseline.h5
+#          monkeyF_timeseries_normalized_no_baseline.h5
+OUTPUT_DIR=/oak/stanford/groups/anishm/gtyagi/stsbench/normalization/results/
+
+echo "Starting normalization (no baseline) for monkeyN..."
 python alternative_timeseries_norm.py \
     --monkey monkeyN \
     --data_dir /scratch/groups/anishm/tvsd/ \
-    --output_dir /oak/stanford/groups/anishm/gtyagi/stsbench/normalization/results/ \
-    --baseline_window 100 \
-    --bin_width 10
+    --output_dir ${OUTPUT_DIR} \
+    --bin_width 10 \
+    --no_baseline_norm
+echo "monkeyN done."
 
-echo "Alternative time-series normalization completed!"
+echo "Starting normalization (no baseline) for monkeyF..."
+python alternative_timeseries_norm.py \
+    --monkey monkeyF \
+    --data_dir /scratch/groups/anishm/tvsd/ \
+    --output_dir ${OUTPUT_DIR} \
+    --bin_width 10 \
+    --no_baseline_norm
+echo "monkeyF done."
+
+echo "Alternative time-series normalization (no baseline) completed!"
