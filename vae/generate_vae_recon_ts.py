@@ -96,6 +96,17 @@ def main():
     src_h5_path = dataset_cfg['timeseries_h5_path']
     os.makedirs(os.path.dirname(args.output_h5), exist_ok=True)
 
+    # T_win used during VAE training — reconstruct with matching window size so
+    # the encoder/decoder operate in-distribution.  If T_win is absent from the
+    # config (e.g. flat VAE), fall back to full-sequence reconstruction.
+    T_win_train  = dataset_cfg.get('T_win', None)
+    win_stride   = dataset_cfg.get('win_stride', 5)
+    use_windowed = (T_win_train is not None) and (vae_mc != 'flat')
+    if use_windowed:
+        print(f'Windowed reconstruction: T_win={T_win_train}, stride={win_stride}')
+    else:
+        print('Full-sequence reconstruction (flat VAE or no T_win in config)')
+
     with h5py.File(src_h5_path, 'r') as src_f, \
          h5py.File(args.output_h5, 'w') as dst_f:
 
@@ -123,9 +134,29 @@ def main():
                     # VAE expects (B, N, T) — transpose
                     x = x.transpose(1, 2)      # (B, N, T)
 
-                    mu, _logvar = vae.encode(x)
-                    # Use mu directly (deterministic) — no reparameterize noise
-                    recon = vae.decode(mu, T_win=T)  # (B, N, T)
+                    if use_windowed:
+                        # Slide T_win-sized windows over the full sequence and
+                        # average overlapping reconstructions — this keeps the
+                        # VAE operating at the same T it was trained on.
+                        B = x.shape[0]
+                        recon_sum   = torch.zeros(B, N, T, device=device)
+                        count       = torch.zeros(T, device=device)
+                        win_starts  = list(range(0, T - T_win_train + 1, win_stride))
+                        # Ensure the last window always covers the sequence end
+                        if not win_starts or win_starts[-1] + T_win_train < T:
+                            win_starts.append(T - T_win_train)
+                        for ws in win_starts:
+                            we     = ws + T_win_train
+                            x_win  = x[:, :, ws:we]           # (B, N, T_win)
+                            mu_w, _logvar_w = vae.encode(x_win)
+                            recon_w = vae.decode(mu_w, T_win=T_win_train)  # (B, N, T_win)
+                            recon_sum[:, :, ws:we] += recon_w
+                            count[ws:we] += 1
+                        recon = (recon_sum / count.unsqueeze(0).unsqueeze(0))
+                    else:
+                        mu, _logvar = vae.encode(x)
+                        # Use mu directly (deterministic) — no reparameterize noise
+                        recon = vae.decode(mu, T_win=T)  # (B, N, T)
 
                     # Transpose back to (B, T, N)
                     recon = recon.transpose(1, 2).cpu().numpy()
