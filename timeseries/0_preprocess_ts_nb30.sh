@@ -5,8 +5,8 @@
 #SBATCH --error=/oak/stanford/groups/anishm/gtyagi/stsbench/timeseries/logs/slurm/preprocess_ts_nb30.%j.err
 #SBATCH --time=2:00:00
 #SBATCH --qos=normal
-#SBATCH -p anishm
-#SBATCH --mem=256G
+#SBATCH -p owners
+#SBATCH --mem=64G
 #SBATCH -n 1
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=gtyagi@stanford.edu
@@ -34,12 +34,12 @@ mkdir -p logs/slurm
 
 echo "Preprocessing ventral stream timeseries (30 bins)..."
 python preprocess_timeseries.py \
-    --timeseries_h5_N /oak/stanford/groups/anishm/gtyagi/stsbench/normalization/results/monkeyN_timeseries_normalized.h5 \
-    --timeseries_h5_F /oak/stanford/groups/anishm/gtyagi/stsbench/normalization/results/monkeyF_timeseries_normalized.h5 \
+    --timeseries_h5_N /oak/stanford/groups/anishm/gtyagi/stsbench/normalization/results/monkeyN_timeseries_normalized_no_baseline.h5 \
+    --timeseries_h5_F /oak/stanford/groups/anishm/gtyagi/stsbench/normalization/results/monkeyF_timeseries_normalized_no_baseline.h5 \
     --raw_mat_N       /scratch/groups/anishm/tvsd/monkeyN_THINGS_MUA_trials.mat \
     --raw_mat_F       /scratch/groups/anishm/tvsd/monkeyF_THINGS_MUA_trials.mat \
     --paper_norm_N    /oak/stanford/groups/anishm/gtyagi/stsbench/results/monkeyN_paper_normalized.mat \
     --paper_norm_F    /oak/stanford/groups/anishm/gtyagi/stsbench/results/monkeyF_paper_normalized.mat \
-    --output_path     /oak/stanford/groups/anishm/gtyagi/stsbench/dataset/ventral_stream_timeseries_preprocessed_nb30.h5 \
+    --output_path     /oak/stanford/groups/anishm/gtyagi/stsbench/dataset/ventral_stream_timeseries_preprocessed_nb30_no_baseline.h5 \
     --num_bins        30
 echo "Ventral preprocessing (30 bins) done."
